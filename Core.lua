@@ -14,7 +14,6 @@ local C_Container, C_Item = C_Container, C_Item
 -- read where the namespaces are missing, so the addon also runs on an older client.
 local LegacySlots = _G.GetContainerNumSlots
 local LegacySlotInfo = _G.GetContainerItemInfo
-local LegacyUse = _G.UseContainerItem
 local LegacyCooldown = _G.GetContainerItemCooldown
 local ItemInfoFn = (C_Item and C_Item.GetItemInfo) or _G.GetItemInfo
 
@@ -44,23 +43,21 @@ function API.SlotItem(bag, slot)
 	if C_Container and C_Container.GetContainerItemInfo then
 		local info = C_Container.GetContainerItemInfo(bag, slot)
 		if not info or not info.itemID or info.itemID == 0 then return nil end
-		return { itemID = info.itemID, count = info.stackCount or 0, locked = info.isLocked and true or false }
+		-- A client that names the stack size differently must not read as an empty
+		-- slot, which would hide every item in the bags.
+		local count = info.stackCount or info.quantity or info.count or 1
+		return { itemID = info.itemID, count = count, locked = info.isLocked and true or false }
 	elseif LegacySlotInfo then
 		local _, count, locked, _, _, _, link = LegacySlotInfo(bag, slot)
 		local itemID = link and link:match("item:(%d+)")
 		if not itemID then return nil end
-		return { itemID = tonumber(itemID), count = count or 0, locked = locked and true or false }
+		return { itemID = tonumber(itemID), count = count or 1, locked = locked and true or false }
 	end
 	return nil
 end
 
-function API.UseSlot(bag, slot)
-	if C_Container and C_Container.UseContainerItem then
-		C_Container.UseContainerItem(bag, slot)
-	elseif LegacyUse then
-		LegacyUse(bag, slot)
-	end
-end
+-- Nothing here uses a bag item: the game blocks that for an addon (Buttons.lua
+-- holds the secure buttons the client clicks for us).
 
 -- name, itemLevel, requiredLevel. Each is nil while the client has not cached
 -- the item, which does not happen for an item in the bags.
@@ -68,6 +65,29 @@ function API.ItemInfo(itemID)
 	if not ItemInfoFn then return nil end
 	local name, _, _, itemLevel, requiredLevel = ItemInfoFn(itemID)
 	return name, itemLevel, requiredLevel
+end
+
+-- The item's inventory icon, or nil while the client has not cached the item.
+function API.ItemIcon(itemID)
+	if C_Item and C_Item.GetItemIconByID then
+		local ok, icon = pcall(C_Item.GetItemIconByID, itemID)
+		if ok and icon then return icon end
+	end
+	return ItemInfoFn and select(10, ItemInfoFn(itemID)) or nil
+end
+
+-- How many of the item the bags hold, for the number on a button.
+function API.CountInBags(itemID)
+	local total = 0
+	for bag = 0, API.NumBags() do
+		for slot = 1, API.NumSlots(bag) do
+			local item = API.SlotItem(bag, slot)
+			if item and item.itemID == itemID then
+				total = total + (item.count or 0)
+			end
+		end
+	end
+	return total
 end
 
 -- classID, subclassID (nil, nil on a client without the instant lookup).
@@ -88,7 +108,8 @@ end
 -- Whether this character may use the item at all (class, proficiency, level).
 function API.IsUsable(itemID)
 	if C_Item and C_Item.IsUsableItem then
-		return C_Item.IsUsableItem(itemID) and true or false
+		local ok, usable = pcall(C_Item.IsUsableItem, itemID)
+		if ok then return usable and true or false end
 	end
 	-- A client without the C_Item lookup: the older call takes the item's link.
 	local LegacyUsable = _G.IsUsableItem
@@ -101,11 +122,21 @@ function API.IsUsable(itemID)
 end
 
 -- start, duration of the item's cooldown; 0, 0 when it is ready or unknown.
+-- The container call takes the slot, not the item: Forever's own usage line reads
+-- C_Container.GetContainerItemCooldown(containerIndex, slotIndex). A client that
+-- answers only the item form is given that instead.
 function API.Cooldown(itemID, bag, slot)
 	if C_Container and C_Container.GetContainerItemCooldown then
-		return C_Container.GetContainerItemCooldown(itemID)
-	elseif LegacyCooldown then
-		return LegacyCooldown(bag, slot)
+		local ok, start, duration = pcall(C_Container.GetContainerItemCooldown, bag, slot)
+		if ok then return start, duration end
+	end
+	if C_Item and C_Item.GetItemCooldown then
+		local ok, start, duration = pcall(C_Item.GetItemCooldown, itemID)
+		if ok then return start, duration end
+	end
+	if LegacyCooldown then
+		local ok, start, duration = pcall(LegacyCooldown, bag, slot)
+		if ok then return start, duration end
 	end
 	return 0, 0
 end
@@ -120,7 +151,8 @@ function BestBite:Db()
 	if ns.db then return ns.db end
 	if type(BestBiteDB) ~= "table" then BestBiteDB = {} end
 	if type(BestBiteDB.learned) ~= "table" then BestBiteDB.learned = {} end
-	if BestBiteDB.skipWhenFull == nil then BestBiteDB.skipWhenFull = true end
+	if BestBiteDB.showIcons == nil then BestBiteDB.showIcons = true end
+	if BestBiteDB.writeMacroIcons == nil then BestBiteDB.writeMacroIcons = false end
 	ns.db = BestBiteDB
 	return ns.db
 end
@@ -129,46 +161,185 @@ function BestBite:Print(message)
 	DEFAULT_CHAT_FRAME:AddMessage("|cff7fd4ffBestBite|r: " .. message)
 end
 
+-- The client names the addon behind a blocked action but never the call that did
+-- it, and writes no line to its log for it. So record what the addon was doing,
+-- and raise it as an error: the client logs Lua errors even when it hides them.
+ns.lastStep = "idle"
+
+function BestBite:Step(text)
+	ns.lastStep = text
+end
+
+local guard = CreateFrame("Frame")
+local reported = nil
+guard:RegisterEvent("ADDON_ACTION_BLOCKED")
+guard:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+guard:SetScript("OnEvent", function(_, event, addonName)
+	if addonName ~= ADDON then return end
+	local step = tostring(ns.lastStep)
+	if reported ~= step then
+		reported = step
+		BestBite:Print("the game blocked BestBite while: " .. step)
+	end
+	if step == "rewriting a macro's icon" then
+		BestBite:Db().writeMacroIcons = false
+		BestBite:Print("turning that off: this client does not allow it.")
+	end
+	local trace = debugstack and debugstack(2, 10, 4) or ""
+	error(("blocked (%s) during: %s\n%s"):format(event, step, trace), 0)
+end)
+
 function BestBite:Help()
 	local frame = DEFAULT_CHAT_FRAME
-	frame:AddMessage("|cff7fd4ffBestBite|r uses the best food or water you carry.")
-	frame:AddMessage("  /bb food - eat the best food in your bags")
-	frame:AddMessage("  /bb water - drink the best water in your bags")
-	frame:AddMessage("  /bb consume - eat and drink together")
-	frame:AddMessage("  /bb full - stop eating or drinking when that bar is already full")
+	frame:AddMessage("|cff7fd4ffBestBite|r uses the best food or water you carry, through a macro:")
+	frame:AddMessage("  food:    /click BestBiteFood")
+	frame:AddMessage("  water:   /click BestBiteWater")
+	frame:AddMessage("  both:    both lines, one after the other")
+	frame:AddMessage("The game blocks an addon from using an item, so a command cannot do it: the click has to come from a macro.")
+	frame:AddMessage("  /bb move - drag the two buttons where you want them")
+	frame:AddMessage("  /bb icons - repaint the action bar button with the item it would use")
+	frame:AddMessage("  /bb macroicon - also rewrite the macro's own icon, if this client allows it")
 	frame:AddMessage("  /bb reset - forget the items it has learned")
+	frame:AddMessage("  /bb debug - report what it sees")
+end
+
+-- Why the commands cannot do the job themselves, and the macro that can, said once
+-- a session so a macro that still holds /bb consume is told what went wrong.
+local advised = false
+function BestBite:Advise(kind)
+	if ns.Buttons then ns.Buttons:Request(0) end
+	if advised then return end
+	advised = true
+
+	local Consume = ns.Consume
+	local missing = Consume and not Consume:Find(kind == "consume" and "food" or kind)
+	local macro = kind == "water" and "/click BestBiteWater"
+		or kind == "food" and "/click BestBiteFood"
+		or "/click BestBiteFood then /click BestBiteWater"
+
+	BestBite:Print("the game blocks an addon from using an item, so this has to come from a macro:")
+	BestBite:Print("    " .. macro)
+	if missing then
+		BestBite:Print("(" .. (kind == "consume" and "no usable food" or "no usable " .. kind) .. " in your bags just now)")
+	end
+end
+
+-- Everything the addon sees, for when a command seems to do nothing: which files
+-- loaded, the setting, the bars, and every food or drink in the bags. It lives
+-- here rather than beside the rest so it still answers when a later file fails.
+function BestBite:Debug()
+	local frame = DEFAULT_CHAT_FRAME
+	local function Say(text)
+		frame:AddMessage("|cff7fd4ffBestBite|r debug: " .. text)
+	end
+
+	Say(("files: Core ok, Detect %s, Consume %s, Buttons %s, Icons %s"):format(
+		ns.Detect and "ok" or "MISSING", ns.Consume and "ok" or "MISSING",
+		ns.Buttons and "ok" or "MISSING", ns.Icons and "ok" or "MISSING"))
+	if ns.Buttons then
+		local food, water = ns.Buttons:Stocked()
+		local shown = ns.Buttons.food.IsShown and ns.Buttons.food:IsShown()
+		Say(("buttons: food %s (shown %s) | water %s"):format(tostring(food), tostring(shown), tostring(water)))
+		Say("macros: /click BestBiteFood and /click BestBiteWater")
+	end
+	Say(("health %d/%d | mana %d/%d | hasMana %s"):format(
+		UnitHealth("player"), UnitHealthMax("player"),
+		UnitPower("player", 0), UnitPowerMax("player", 0),
+		API.HasMana() and "yes" or "no"))
+
+	local seen = 0
+	for bag = 0, API.NumBags() do
+		for slot = 1, API.NumSlots(bag) do
+			local item = API.SlotItem(bag, slot)
+			if item and API.IsFoodDrink(item.itemID) then
+				seen = seen + 1
+				local name, _, requiredLevel = API.ItemInfo(item.itemID)
+				local kind, amount, buffs = "?", nil, nil
+				if ns.Detect then
+					local ok, scanned, size, found = pcall(ns.Detect.Scan, ns.Detect, bag, slot)
+					if ok then
+						kind, amount, buffs = scanned or "unreadable", size, found
+					else
+						kind = "SCAN ERROR " .. tostring(scanned)
+					end
+				end
+				local points = ns.Detect and ns.Detect:Points(buffs) or 0
+				Say(("%d/%d %s: %s, %s %s | usable %s | level %s | x%d%s%s"):format(
+					bag, slot, item.itemID, name or "?", kind, amount or "?",
+					API.IsUsable(item.itemID) and "yes" or "NO",
+					requiredLevel or 0, item.count or 0,
+					points > 0 and (" | buffs " .. points) or "",
+					item.locked and " | LOCKED" or ""))
+			end
+		end
+	end
+	if seen == 0 then Say("no Food & Drink item in any bag") end
+
+	local function Best(kind)
+		if not ns.Consume then return "no Consume module" end
+		local ok, pick = pcall(ns.Consume.Find, ns.Consume, kind)
+		if not ok then return "ERROR " .. tostring(pick) end
+		if not pick then return "none" end
+		return ("bag %d slot %d, %s"):format(pick.bag, pick.slot, tostring(pick.amount))
+	end
+	Say("best food: " .. Best("food") .. " | best water: " .. Best("water"))
 end
 
 -- For macros and /run: BestBite.Eat(), BestBite.Drink(), BestBite.Consume().
 function BestBite.Eat()
-	return ns.Consume:Eat()
+	return BestBite:Advise("food")
 end
 
 function BestBite.Drink()
-	return ns.Consume:Drink()
+	return BestBite:Advise("water")
 end
 
 function BestBite.Consume()
-	return ns.Consume:Both()
+	return BestBite:Advise("consume")
 end
 
-local function HandleCommand(message)
+local function RunCommand(message)
 	local command = tostring(message or ""):match("^%s*(.-)%s*$"):lower()
 	if command == "food" or command == "eat" then
-		ns.Consume:Eat()
+		BestBite:Advise("food")
 	elseif command == "water" or command == "drink" then
-		ns.Consume:Drink()
+		BestBite:Advise("water")
 	elseif command == "consume" or command == "both" then
-		ns.Consume:Both()
-	elseif command == "full" then
-		local db = BestBite:Db()
-		db.skipWhenFull = not db.skipWhenFull
-		BestBite:Print("Skipping a full bar: " .. (db.skipWhenFull and "on" or "off"))
+		BestBite:Advise("consume")
 	elseif command == "reset" then
 		wipe(BestBite:Db().learned)
 		BestBite:Print("Forgot the items it had learned.")
+	elseif command == "icons" then
+		local db = BestBite:Db()
+		db.showIcons = db.showIcons == false
+		BestBite:Print("Action bar icons: " .. (db.showIcons and "on" or "off"))
+		if ns.Icons then
+			if db.showIcons then
+				ns.Icons:Request(0)
+			else
+				ns.Icons:Restore()
+			end
+		end
+	elseif command == "move" then
+		if ns.Buttons then ns.Buttons:SetMoving(not ns.Buttons.moving) end
+	elseif command == "macroicon" then
+		local db = BestBite:Db()
+		db.writeMacroIcons = not db.writeMacroIcons
+		BestBite:Print("Rewriting the macro's own icon: " .. (db.writeMacroIcons and "on" or "off"))
+		if db.writeMacroIcons and ns.Icons then ns.Icons:Request(0) end
+	elseif command == "debug" then
+		BestBite:Debug()
 	else
 		BestBite:Help()
+	end
+end
+
+-- A command that throws says so in chat: a client call that disagrees with this
+-- addon must not leave a macro looking like it did nothing.
+local function HandleCommand(message)
+	local ok, err = pcall(RunCommand, message)
+	if not ok then
+		BestBite:Print("error: " .. tostring(err))
 	end
 end
 
