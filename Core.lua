@@ -90,6 +90,13 @@ function API.IsUsable(itemID)
 	if C_Item and C_Item.IsUsableItem then
 		return C_Item.IsUsableItem(itemID) and true or false
 	end
+	-- A client without the C_Item lookup: the older call takes the item's link.
+	local LegacyUsable = _G.IsUsableItem
+	local link = ItemInfoFn and select(2, ItemInfoFn(itemID))
+	if LegacyUsable and link then
+		local ok, usable = pcall(LegacyUsable, link)
+		if ok then return usable and true or false end
+	end
 	return true
 end
 
