@@ -96,14 +96,25 @@ local notice, noticeLines, noticeUntil = nil, {}, 0
 
 local function BuildNotice()
 	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent)
-	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
-	frame:SetSize(400, 44)
+	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 132)
+	frame:SetSize(400, 52)
 	frame:SetFrameStrata("HIGH")
 	frame:SetFrameLevel(50)
+	-- The client's own speech-bubble art, the one it draws over a character that talks, so
+	-- this reads as a bubble over yours rather than as another window. It is drawn here and
+	-- never sent anywhere: no other player sees it.
+	if frame.SetBackdrop then
+		pcall(frame.SetBackdrop, frame, {
+			bgFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
+			edgeFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
+			tile = false, tileSize = 0, edgeSize = 12,
+			insets = { left = 12, right = 12, top = 10, bottom = 12 },
+		})
+	end
 	frame.lines = {}
 	for index = 1, 2 do
 		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-		line:SetPoint("CENTER", frame, "CENTER", 0, (2 - index) * 18 - 9)
+		line:SetPoint("CENTER", frame, "CENTER", 0, (2 - index) * 16 - 8)
 		line:SetJustifyH("CENTER")
 		line:SetText("")
 		frame.lines[index] = line
