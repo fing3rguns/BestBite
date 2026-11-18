@@ -221,10 +221,10 @@ local function Build(self)
 			Window:Refresh()
 		end
 	end
-	buttons.vendorLess = Command("vendorLess", "minus", 26)
+	buttons.vendorLess = Command("vendorLess", "-", 26)
 	buttons.vendorLess:SetPoint("LEFT", self.targetLabel, "RIGHT", 6, 0)
 	buttons.vendorLess:SetScript("OnClick", function() StepTarget(-(ns.Vendor and ns.Vendor.TARGET_STEP or 5))() end)
-	buttons.vendorMore = Command("vendorMore", "plus", 26)
+	buttons.vendorMore = Command("vendorMore", "+", 26)
 	buttons.vendorMore:SetPoint("LEFT", buttons.vendorLess, "RIGHT", 4, 0)
 	buttons.vendorMore:SetScript("OnClick", function() StepTarget(ns.Vendor and ns.Vendor.TARGET_STEP or 5)() end)
 
