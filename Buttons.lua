@@ -6,7 +6,8 @@
 -- So these are two real buttons, drawn like gems above the action bar and draggable
 -- by their right button: click one to eat or drink, or run a macro holding
 -- /click BestBiteFood. They follow the bags out of combat, since a secure button's
--- attributes and position are the game's to lock during a fight.
+-- attributes and position are the game's to lock during a fight. With nothing to use
+-- one keeps its place and goes grey, rather than vanishing.
 
 local ADDON, ns = ...
 
@@ -17,7 +18,14 @@ local Buttons = {}
 ns.Buttons = Buttons
 
 local SIZE = 40
-local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_Food_16"
+-- What a slot with nothing to put in it shows: an icon of its own kind, greyed, so a
+-- button with nothing to use still reads as the food or the water button.
+local EMPTY_ICON = {
+	food = "Interface\\Icons\\INV_Misc_Food_16",
+	water = "Interface\\Icons\\INV_Drink_04",
+}
+local EMPTY_ALPHA = 0.35
+local FALLBACK_ICON = EMPTY_ICON.food
 
 local function SavePosition(button)
 	local point, _, relativePoint, x, y = button:GetPoint(1)
@@ -56,7 +64,13 @@ local function NewButton(name, key, offset)
 	button.icon:SetSize(SIZE - 8, SIZE - 8)
 	button.icon:SetPoint("CENTER")
 	button.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-	button.icon:SetTexture(FALLBACK_ICON)
+
+	-- It starts out as the empty state, so a button on its first frame reads as an
+	-- empty food or water slot rather than flashing an item it has not met yet.
+	button.emptyIcon = EMPTY_ICON[key] or FALLBACK_ICON
+	button.icon:SetTexture(button.emptyIcon)
+	button.icon:SetDesaturated(true)
+	button.icon:SetAlpha(EMPTY_ALPHA)
 
 	local highlight = button:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
 	if highlight and highlight.SetBlendMode then
@@ -79,7 +93,11 @@ local function NewButton(name, key, offset)
 			pcall(GameTooltip.SetItemByID, GameTooltip, self.itemID)
 			GameTooltip:AddLine("Right-drag to move", 0.7, 0.7, 0.7)
 		elseif not self.itemID then
-			GameTooltip:AddLine(key == "water" and "No water in your bags" or "No food in your bags")
+			GameTooltip:AddLine(key == "water" and "Out of water" or "Out of food")
+			GameTooltip:AddLine(key == "water"
+				and "The best drink you can use fills this slot."
+				or "The best food you can use fills this slot.", 0.7, 0.7, 0.7, true)
+			GameTooltip:AddLine("Right-drag to move", 0.7, 0.7, 0.7)
 		end
 		GameTooltip:Show()
 	end)
@@ -119,14 +137,21 @@ local function Stock(button, pick)
 	button:SetAttribute("item", pick and pick.itemID and ("item:" .. pick.itemID) or nil)
 	if pick then
 		local count = API.CountInBags(pick.itemID)
-		button.icon:SetTexture(API.ItemIcon(pick.itemID) or FALLBACK_ICON)
+		button.icon:SetTexture(API.ItemIcon(pick.itemID) or button.emptyIcon)
+		button.icon:SetDesaturated(false)
+		button.icon:SetAlpha(1)
 		-- One of a thing reads better bare, as on an action button.
 		button.count:SetText(count > 1 and count or "")
-		button:Show()
 	else
+		button.icon:SetTexture(button.emptyIcon)
+		button.icon:SetDesaturated(true)
+		button.icon:SetAlpha(EMPTY_ALPHA)
 		button.count:SetText("")
-		button:Hide()
 	end
+	-- Out of food or water the button keeps its place, greyed, with no item to use: it
+	-- stays where it was put so the other button never shifts and a macro never clicks
+	-- at nothing. Clicking it does nothing, and its tooltip says why.
+	button:Show()
 end
 
 -- The game locks a secure button's attributes and position during a fight: a change

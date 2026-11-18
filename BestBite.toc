@@ -1,13 +1,14 @@
 ## Interface: 16001
 ## Title: BestBite
 ## Notes: Two buttons above the action bar use the best food or water in your bags; macros can /click BestBiteFood. /bb explains.
-## Version: 1.1.0
+## Version: 1.2.0
 ## SavedVariables: BestBiteDB
-## IconTexture: Interface\Icons\INV_Misc_Food_16
+## IconTexture: Interface\AddOns\BestBite\Icon.png
 ## X-Category: Inventory
 
 Core.lua
 Detect.lua
+Buffs.lua
 Consume.lua
 Buttons.lua
 Icons.lua

@@ -14,10 +14,13 @@ ns.Consume = Consume
 -- The best item of `kind` the character can use right now:
 -- { bag, slot, itemID, name, amount, points }, or nil when the bags hold none.
 -- Food that buffs a stat counts for more than food that does not, however much the
--- plain one restores: a Well Fed bonus outlasts one meal's worth of health.
+-- plain one restores: a Well Fed bonus outlasts one meal's worth of health. That holds
+-- while the buff is missing or nearly spent. With the buff banked it inverts, and the
+-- food that restores the most wins instead, since the buff is already paid for.
 function Consume:Find(kind)
 	local level = UnitLevel("player")
 	local now = GetTime()
+	local preferBuffs = not (kind == "food" and ns.Buffs and ns.Buffs:Banked(now))
 	local best, bestPoints, bestAmount, bestItemLevel, bestCount
 
 	for bag = 0, API.NumBags() do
@@ -37,7 +40,11 @@ function Consume:Find(kind)
 						if not best then
 							better = true
 						elseif (points > 0) ~= (bestPoints > 0) then
-							better = points > 0
+							if preferBuffs then
+								better = points > 0
+							else
+								better = bestPoints > 0
+							end
 						elseif points ~= bestPoints then
 							better = points > bestPoints
 						elseif amount ~= bestAmount then

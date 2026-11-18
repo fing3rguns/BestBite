@@ -8,7 +8,7 @@ local BestBite = {}
 ns.BestBite = BestBite
 _G.BestBite = BestBite
 
-local C_Container, C_Item = C_Container, C_Item
+local C_Container, C_Item, C_UnitAuras = C_Container, C_Item, C_UnitAuras
 
 -- Forever answers the C_Container and C_Item namespaces; the pre-10.0 globals are
 -- read where the namespaces are missing, so the addon also runs on an older client.
@@ -146,6 +146,30 @@ function API.HasMana()
 	return (UnitPowerMax("player", 0) or 0) > 0
 end
 
+-- The player's auras as { name = string, icon = texture, duration = seconds,
+-- expires = GetTime() stamp or nil, spellID = number }, so a food buff on the player
+-- can be recognised and timed. Both shapes of the call are answered: this client has
+-- C_UnitAuras, and older ones have UnitAura, which Forever still resolves.
+function API.Auras(filter)
+	filter = filter or "HELPFUL"
+	local list = {}
+	for index = 1, 40 do
+		local name, icon, duration, expires, spellID
+		if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+			local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "player", index, filter)
+			if ok and aura then
+				name, icon, duration, expires, spellID =
+					aura.name, aura.icon, aura.duration, aura.expirationTime, aura.spellId
+			end
+		elseif UnitAura then
+			name, icon, _, _, duration, expires, _, _, _, spellID = UnitAura("player", index, filter)
+		end
+		if not name then break end
+		list[#list + 1] = { name = name, icon = icon, duration = duration, expires = expires, spellID = spellID }
+	end
+	return list
+end
+
 -- The saved variables, filled in on first use so the file needs no load event.
 function BestBite:Db()
 	if ns.db then return ns.db end
@@ -238,14 +262,46 @@ function BestBite:Debug()
 		ns.Buttons and "ok" or "MISSING", ns.Icons and "ok" or "MISSING"))
 	if ns.Buttons then
 		local food, water = ns.Buttons:Stocked()
-		local shown = ns.Buttons.food.IsShown and ns.Buttons.food:IsShown()
-		Say(("buttons: food %s (shown %s) | water %s"):format(tostring(food), tostring(shown), tostring(water)))
+		Say(("buttons: food %s | water %s"):format(food or "empty", water or "empty"))
 		Say("macros: /click BestBiteFood and /click BestBiteWater")
 	end
 	Say(("health %d/%d | mana %d/%d | hasMana %s"):format(
 		UnitHealth("player"), UnitHealthMax("player"),
 		UnitPower("player", 0), UnitPowerMax("player", 0),
 		API.HasMana() and "yes" or "no"))
+
+	-- What the player is under, with the icon and time left: this is how a food buff is
+	-- told apart from any other, and how long it has to run.
+	local auras = API.Auras("HELPFUL")
+	if #auras == 0 then
+		Say("auras: none")
+	else
+		local parts = {}
+		for _, aura in ipairs(auras) do
+			local left = aura.duration and aura.duration > 0 and aura.expires
+				and math.max(0, math.floor(aura.expires - GetTime()))
+			parts[#parts + 1] = ("%s [%s] %s"):format(
+				tostring(aura.name),
+				tostring(aura.icon or "?"):match("[^\\]+$") or "?",
+				left and (left .. "s") or "no timer")
+		end
+		Say("auras: " .. table.concat(parts, ", "))
+	end
+
+	-- Which food the button should hold turns on this: a banked buff means plain food
+	-- leads, a missing or nearly spent one means buff food does.
+	if ns.Buffs then
+		local left = ns.Buffs:Left()
+		if left then
+			Say(("food buff: %s left, so buff food %s"):format(
+				left == math.huge and "no timer" or (math.floor(left) .. "s"),
+				ns.Buffs:Banked() and "waits" or "leads"))
+		else
+			Say("food buff: none, so buff food leads")
+		end
+	else
+		Say("food buff: Buffs MISSING")
+	end
 
 	local seen = 0
 	for bag = 0, API.NumBags() do

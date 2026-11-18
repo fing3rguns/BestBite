@@ -75,7 +75,7 @@ UnitPower = function() return PLAYER.mana end
 UnitPowerMax = function() return PLAYER.manaMax end
 GetTime = function() return 1000 end
 InCombatLockdown = function() return COMBAT end
-C_Timer = { After = function(_, run) run() end }
+C_Timer = { After = function(_, run) TIMERS = (TIMERS or 0) + 1; run() end }
 hooksecurefunc = function() end
 
 C_Container = {
@@ -97,6 +97,20 @@ C_Container = {
 		local cool = held and COOLDOWNS[held.itemID]
 		if not cool then return 0, 0 end
 		return cool[1], cool[2]
+	end,
+}
+
+C_UnitAuras = {
+	GetAuraDataByIndex = function(_, index, filter)
+		local aura = AURAS[index]
+		if not aura then return nil end
+		return {
+			name = aura.name,
+			icon = aura.icon,
+			duration = aura.duration,
+			expirationTime = aura.expirationTime,
+			spellId = aura.spellId,
+		}
 	end,
 }
 
@@ -167,7 +181,8 @@ CreateFrame = function(_, name, _, template)
 			function texture:SetSize(w, h) self.width = w end
 			function texture:SetTexCoord() end
 			function texture:SetBlendMode() end
-			function texture:SetAlpha() end
+			function texture:SetAlpha(alpha) self.alpha = alpha end
+			function texture:SetDesaturated(flag) self.desaturated = flag end
 			function texture:SetTexture(path) self.texture = path end
 			return texture
 		end
@@ -187,9 +202,10 @@ CreateFrame = function(_, name, _, template)
 	return TOOLTIP
 end
 
+TOOLTIP_LINES = {}
 GameTooltip = {
-	SetOwner = function() end,
-	AddLine = function() end,
+	SetOwner = function() TOOLTIP_LINES = {} end,
+	AddLine = function(_, text) TOOLTIP_LINES[#TOOLTIP_LINES + 1] = text end,
 	Show = function() end,
 	Hide = function() end,
 	SetItemByID = function() end,
@@ -233,6 +249,7 @@ local function LoadAddon(file)
 end
 LoadAddon("Core.lua")
 LoadAddon("Detect.lua")
+LoadAddon("Buffs.lua")
 LoadAddon("Consume.lua")
 LoadAddon("Buttons.lua")
 LoadAddon("Icons.lua")
@@ -253,6 +270,9 @@ end
 
 local function Reset()
 	BAGS, COOLDOWNS, MESSAGES = {}, {}, {}
+	TOOLTIP_LINES = {}
+	AURAS = {}
+	TIMERS = 0
 	MACROS, MACTION, MACTION_TEXTURE = {}, {}, {}
 	PLAYER = { level = 60, health = 500, healthMax = 1000, mana = 500, manaMax = 1000 }
 	COMBAT = false
@@ -282,6 +302,9 @@ Check("stock: the best food is on the food button", Food() == "item:422", Food()
 Check("stock: the best water is on the water button", Water() == "item:8766", Water())
 Check("stock: the button is shown with its item", ns.Buttons.food.shown and ns.Buttons.food.itemID == 422,
 	tostring(ns.Buttons.food.itemID))
+Check("stock: a stocked button is drawn at full strength",
+	ns.Buttons.food.icon.desaturated == false and ns.Buttons.food.icon.alpha == 1,
+	tostring(ns.Buttons.food.icon.desaturated) .. " " .. tostring(ns.Buttons.food.icon.alpha))
 
 -- The count in the button's corner is how many the bags hold, over every stack.
 Reset()
@@ -328,6 +351,79 @@ end)())
 ITEMS[2001].lines = {
 	"Buff Rations", "Use: Restores 61 health over 15 sec.", "Well Fed: Stamina increased by 12." }
 
+-- A food buff changes the ranking: while it is banked the buff food is not worth eating,
+-- and in its last half minute it is again. The buff is a player aura with a name and a
+-- time left, which is what Buffs.lua reads.
+local function Fed(seconds)
+	AURAS = { { name = "Well Fed", icon = "Interface\\Icons\\INV_Misc_Food_15", duration = seconds,
+		expirationTime = seconds > 0 and (1000 + seconds) or 0, spellId = 232493 } }
+end
+
+Reset()
+Put(0, 1, 2003); Put(0, 2, 2001)
+Fed(600)
+ns.Buttons:Update()
+Check("buff: with the buff banked the biggest restore wins", Food() == "item:2003", Food())
+
+Reset()
+Put(0, 1, 2003); Put(0, 2, 2001)
+Fed(20)
+ns.Buttons:Update()
+Check("buff: in its last half minute buff food leads again", Food() == "item:2001", Food())
+
+Fed(30)
+ns.Buttons:Update()
+Check("buff: at half a minute it is worth topping up", Food() == "item:2001", Food())
+
+Reset()
+Put(0, 1, 2003); Put(0, 2, 2001)
+AURAS = { { name = "Well Fed", icon = "Interface\\Icons\\INV_Misc_Food_15", duration = 0, expirationTime = 0 } }
+ns.Buttons:Update()
+Check("buff: a buff without a timer counts as banked", Food() == "item:2003", Food())
+
+Reset()
+Put(0, 1, 2003); Put(0, 2, 2001); Put(0, 3, 159)
+Fed(600)
+ns.Buttons:Update()
+Check("buff: water is chosen the same way as always", Water() == "item:159", Water())
+
+Reset()
+Put(0, 1, 2003); Put(0, 2, 2001)
+AURAS = { { name = "Nourished", icon = "Interface\\Icons\\INV_Misc_Food_15", duration = 900, expirationTime = 1900 } }
+ns.Buttons:Update()
+Check("buff: an aura it does not know is not a food buff", Food() == "item:2001", Food())
+
+-- The crossing itself is not an event, so a timer is set for it: one while the buff is
+-- banked, none when buff food should lead.
+Reset()
+Put(0, 1, 2001)
+Fed(600)
+TIMERS = 0
+ns.Buffs:Refresh()
+Check("buff: a timer is set for when the buff stops being banked", TIMERS == 1, tostring(TIMERS))
+
+Fed(20)
+TIMERS = 0
+ns.Buffs:Refresh()
+Check("buff: no timer is set once buff food leads", TIMERS == 0, tostring(TIMERS))
+
+AURAS = {}
+TIMERS = 0
+ns.Buffs:Refresh()
+Check("buff: no timer is set without a buff", TIMERS == 0, tostring(TIMERS))
+
+-- /bb debug says what it makes of the buff.
+Reset()
+Put(0, 1, 2001)
+Fed(600)
+slash("debug")
+Check("buff: the debug reports the time left and the ranking",
+	Said("food buff: 600s left, so buff food waits"), MESSAGES[#MESSAGES])
+
+AURAS = {}
+slash("debug")
+Check("buff: the debug says when there is no buff", Said("food buff: none"))
+
 -- A potion restores health but is not food.
 Reset()
 Put(0, 1, 118)
@@ -356,13 +452,31 @@ COOLDOWNS[8766] = { 900, 300 }
 ns.Buttons:Update()
 Check("stock: an item on cooldown is passed over", Water() == "item:159", Water())
 
--- Emptying the bags clears the buttons, so a click does nothing rather than the
--- wrong thing, and hides them.
+-- Emptying the bags clears the items, so a click does nothing rather than the wrong
+-- thing, but each button keeps its place and goes grey instead of vanishing.
 BAGS = {}
 ns.Buttons:Update()
-Check("stock: the button hides when the bags hold none", ns.Buttons.food.shown == false)
 Check("stock: empty bags clear the food button", Food() == nil, tostring(Food()))
 Check("stock: empty bags clear the water button", Water() == nil, tostring(Water()))
+Check("empty: the button stays where it is", ns.Buttons.food.shown == true)
+Check("empty: the food button shows its own kind, greyed",
+	ns.Buttons.food.icon.texture == "Interface\\Icons\\INV_Misc_Food_16"
+		and ns.Buttons.food.icon.desaturated == true
+		and ns.Buttons.food.icon.alpha < 1,
+	tostring(ns.Buttons.food.icon.texture) .. " " .. tostring(ns.Buttons.food.icon.alpha))
+Check("empty: the water button shows a drink", ns.Buttons.water.icon.texture == "Interface\\Icons\\INV_Drink_04",
+	tostring(ns.Buttons.water.icon.texture))
+Check("empty: an empty button counts nothing", ns.Buttons.food.count:GetText() == "",
+	ns.Buttons.food.count:GetText())
+
+ns.Buttons.food.OnEnter(ns.Buttons.food)
+Check("empty: the tooltip says it is out of food", TOOLTIP_LINES[1] == "Out of food", tostring(TOOLTIP_LINES[1]))
+Check("empty: the tooltip says what fills it",
+	TOOLTIP_LINES[2] ~= nil and TOOLTIP_LINES[2]:find("fills this slot", 1, true) ~= nil, tostring(TOOLTIP_LINES[2]))
+
+ns.Buttons.water.OnEnter(ns.Buttons.water)
+Check("empty: the water tooltip says it is out of water", TOOLTIP_LINES[1] == "Out of water",
+	tostring(TOOLTIP_LINES[1]))
 
 -- A fight locks a secure button's attributes: the change waits for it to end.
 Reset()
@@ -427,11 +541,12 @@ Check("move: a click cannot use anything while moving", Food() == nil and Water(
 
 BAGS = {}
 ns.Buttons:Update()
-Check("move: restocking waits while moving", ns.Buttons.food.shown == true)
+Check("move: restocking waits while moving", ns.Buttons.food.itemID == 422, tostring(ns.Buttons.food.itemID))
 
 slash("move")
 Check("move: the mode is off", ns.Buttons.moving == false)
-Check("move: restocking resumes", ns.Buttons.food.shown == false)
+Check("move: restocking resumes", ns.Buttons.food.itemID == nil and ns.Buttons.food.shown == true,
+	tostring(ns.Buttons.food.itemID))
 
 -- Right-drag must not use the item: only the left button may click, and both of its
 -- events are registered so a macro's /click reaches the button.
@@ -481,6 +596,20 @@ ns.Buttons.food.OnDragStart(ns.Buttons.food, "RightButton")
 Check("move: a fight keeps the buttons where they are", MOVE_STARTED == 0, tostring(MOVE_STARTED))
 Check("move: and says why", Said("out of combat"), MESSAGES[1])
 COMBAT = false
+
+-- The aura list in /bb debug is what a food buff gets recognised from, and how long it
+-- has left to run.
+Reset()
+Put(0, 1, 422)
+AURAS = { { name = "Well Fed", icon = "Interface\\Icons\\INV_Misc_Food_15", duration = 900, expirationTime = 1812,
+	spellId = 232493 } }
+slash("debug")
+Check("auras: the debug lists the aura with its icon and time left",
+	Said("auras: Well Fed [INV_Misc_Food_15] 812s"), MESSAGES[#MESSAGES])
+
+AURAS = {}
+slash("debug")
+Check("auras: the debug says when there are none", Said("auras: none"))
 
 -- /bb debug reports what it sees, including what the buttons would click.
 Reset()
