@@ -23,6 +23,9 @@ Vendor.TARGET_MIN = 5
 Vendor.TARGET_MAX = 100
 Vendor.TARGET_STEP = 5
 
+-- Set once a weak item has been bought this visit, so MERCHANT_UPDATE cannot buy it again.
+Vendor.fallbackDone = false
+
 function Vendor:Db()
 	local db = BestBite:Db()
 	return db.vendor
@@ -106,13 +109,13 @@ function Vendor:Merchant(index)
 end
 
 -- The best item of a kind this vendor sells, ranked by the same ordering the buttons use,
--- so what is bought is what would be used. An item outside the level band is not vetoed:
--- it is still offered when it is the best the vendor has, and reported as a fallback so
--- the buyer knows it is weak for this level.
+-- so what is bought is what would be used. Items good for this level win; when it sells
+-- none of those, the best usable one is offered rather than nothing, and said to be a
+-- fallback.
 function Vendor:Pick(kind)
 	local level = UnitLevel("player") or 0
 	local preferBuffs = Consume:PreferBuffs(kind)
-	local best
+	local best, fallback
 
 	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
 		local itemID, price, stack, available = self:Merchant(index)
@@ -126,13 +129,18 @@ function Vendor:Pick(kind)
 					points = Detect:Points(buffs), itemLevel = itemLevel or 0,
 					count = available,
 				}
-				if Consume:Better(candidate, best, preferBuffs) then best = candidate end
+				if self:LevelAppropriate(itemID, level) then
+					if Consume:Better(candidate, best, preferBuffs) then best = candidate end
+				elseif Consume:Better(candidate, fallback, preferBuffs) then
+					fallback = candidate
+				end
 			end
 		end
 	end
 
-	if not best then return nil, false end
-	return best, not self:LevelAppropriate(best.itemID, level)
+	if best then return best, false end
+	if fallback then return fallback, true end
+	return nil, false
 end
 
 -- Buys as much of the pick as the shortfall asks for, never more than the vendor holds or
@@ -170,6 +178,9 @@ function Vendor:Restock(explicit)
 	if not (explicit or self:Db().on) then return false end
 	if not (GetMerchantNumItems and GetMerchantNumItems() > 0) then return false, "no merchant" end
 
+	-- An explicit purchase always gets a fresh attempt at a fallback.
+	if explicit then self.fallbackDone = false end
+
 	local stood, why = self:StandDown()
 	if stood then
 		BestBite:Print(why .. ", so BestBite leaves it to Polestar.")
@@ -181,10 +192,13 @@ function Vendor:Restock(explicit)
 		local shortfall = self:Shortfall(kind)
 		if shortfall > 0 then
 			local pick, fellBack = self:Pick(kind)
-			if pick then
+			-- A fallback never counts towards the target, so a second pass of this visit would
+			-- buy the same weak item again: one such purchase per visit is enough.
+			if pick and not (fellBack and self.fallbackDone) then
 				local bought, left, reason = self:Buy(pick, shortfall)
 				if bought > 0 then
 					didSomething = true
+					if fellBack then self.fallbackDone = true end
 					local name = (API.ItemInfo(pick.itemID))
 					said[#said + 1] = ("bought %d %s for %s"):format(bought, tostring(name or "item"),
 						GetCoinTextureString and GetCoinTextureString(bought * (pick.price or 0)) or (bought * (pick.price or 0) .. "c"))
@@ -228,4 +242,8 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("MERCHANT_SHOW")
 events:RegisterEvent("MERCHANT_UPDATE")
-events:SetScript("OnEvent", function() Vendor:Request() end)
+events:SetScript("OnEvent", function(_, event)
+	-- Opening a merchant starts a new visit, so a weak item may be bought once again.
+	if event == "MERCHANT_SHOW" then Vendor.fallbackDone = false end
+	Vendor:Request()
+end)

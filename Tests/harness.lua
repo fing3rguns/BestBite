@@ -51,6 +51,11 @@ Item(2003, { name = "Plain Loaf", class = 0, sub = 5, ilvl = 20, req = 1, lines 
 Item(2004, { name = "Hearty Stew", class = 0, sub = 5, ilvl = 20, req = 1, lines = {
 	"Hearty Stew", "Use: Restores 100 health over 15 sec.",
 	"Use: Increases Stamina by 12 for 15 min." } })
+Item(2010, { name = "Banquet Portions", class = 0, sub = 5, ilvl = 55, req = 55, lines = {
+	"Banquet Portions", "Use: Restores 400 health over 20 sec.",
+	"Well Fed: Stamina increased by 14." } })
+Item(8770, { name = "Sparkling Spring Water", class = 0, sub = 5, ilvl = 55, req = 55, lines = {
+	"Sparkling Spring Water", "Use: Restores 1344 mana over 24 sec. Must remain seated while drinking." } })
 
 ---------------------------------------------------------------------------- state
 local BAGS, COOLDOWNS, MESSAGES = {}, {}, {}
@@ -393,6 +398,7 @@ local function Reset()
 	COMBAT = false
 	BestBiteDB, ns.db = nil, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
+	ns.Vendor.fallbackDone = false
 end
 
 local function Put(bagID, slot, itemID, count, locked)
@@ -1008,17 +1014,14 @@ Check("vendor: one stack is the default target", ns.Vendor:Db().target == 5, tos
 Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)   -- Raid Food, restores 2000
-Stock(2, 8766, 20, 5, 20)   -- Morning Glory Dew, restores 835 mana
+Stock(2, 8770, 20, 5, 20)   -- Sparkling Spring Water, restores 1344 mana
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
--- Morning Glory Dew needs level 45, so at 60 it sits outside the band and can never count
--- towards the target (Vendor:Count); what the visit did is checked on the purchase itself.
-Check("vendor: water is bought up to the target",
-	MERCHANT.bought[2] ~= nil and MERCHANT.bought[2].itemID == 8766 and MERCHANT.bought[2].quantity == 5,
-	MERCHANT.bought[2] and tostring(MERCHANT.bought[2].itemID) .. " x " .. tostring(MERCHANT.bought[2].quantity))
+Check("vendor: water is bought up to the target", ns.Vendor:Count("water", 60) == 5,
+	tostring(ns.Vendor:Count("water", 60)))
 Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
 Check("vendor: and it said what it bought", Said("bought"), table.concat(MESSAGES, " / "))
 
@@ -1047,18 +1050,18 @@ Check("vendor: a thin vendor sells what it has", ns.Vendor:Count("food", 60) == 
 Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)
-Stock(2, 2001, 45, 5, 20)   -- Buff Rations: 61 health, 12 stamina
+Stock(2, 2010, 45, 5, 20)   -- Banquet Portions: 400 health, 14 stamina
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: buff food is bought when nothing is banked",
-	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 2001,
+	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 2010,
 	MERCHANT.bought[1] and tostring(MERCHANT.bought[1].itemID))
 
 Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)
-Stock(2, 2001, 45, 5, 20)
+Stock(2, 2010, 45, 5, 20)
 Fed(600)
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
@@ -1109,6 +1112,32 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: a fallback is bought when nothing is in band", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 Check("vendor: and it says it was a fallback", Said("below your level"), table.concat(MESSAGES, " / "))
+
+-- A weak item never outranks one of the band on the same vendor.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)   -- Raid Food, level 60: in the band
+Stock(2, 2001, 10, 5, 20)   -- Buff Rations, level 1: outside it, but buffs
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: an item of the band wins over a weak one",
+	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 9999,
+	MERCHANT.bought[1] and tostring(MERCHANT.bought[1].itemID))
+Check("vendor: and nothing is said to be below the level", not Said("below your level"),
+	table.concat(MESSAGES, " / "))
+
+-- MERCHANT_UPDATE re-runs the pass after every purchase: one fallback a visit is enough.
+Reset()
+PLAYER.level = 60
+Stock(1, 422, 10, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+ns.Vendor:Restock()
+Check("vendor: a fallback is bought once a visit", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+ns.Vendor:Restock(true)
+Check("vendor: a Buy now press buys the fallback again", #MERCHANT.bought == 2, tostring(#MERCHANT.bought))
 
 -- Polestar handling it means BestBite does not buy.
 Reset()
