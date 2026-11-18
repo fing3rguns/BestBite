@@ -1004,6 +1004,135 @@ Reset()
 Check("vendor: restocking is off by default", ns.Vendor:Db().on == false)
 Check("vendor: one stack is the default target", ns.Vendor:Db().target == 5, tostring(ns.Vendor:Db().target))
 
+-- With the switch on and the bags empty, a visit buys up to the target for each kind.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)   -- Raid Food, restores 2000
+Stock(2, 8766, 20, 5, 20)   -- Morning Glory Dew, restores 835 mana
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 5,
+	tostring(ns.Vendor:Count("food", 60)))
+-- Morning Glory Dew needs level 45, so at 60 it sits outside the band and can never count
+-- towards the target (Vendor:Count); what the visit did is checked on the purchase itself.
+Check("vendor: water is bought up to the target",
+	MERCHANT.bought[2] ~= nil and MERCHANT.bought[2].itemID == 8766 and MERCHANT.bought[2].quantity == 5,
+	MERCHANT.bought[2] and tostring(MERCHANT.bought[2].itemID) .. " x " .. tostring(MERCHANT.bought[2].quantity))
+Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
+Check("vendor: and it said what it bought", Said("bought"), table.concat(MESSAGES, " / "))
+
+-- Part of a target is topped up, not a whole one.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+Put(0, 1, 9999, 3)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a partial target is topped up to exactly the target", ns.Vendor:Count("food", 60) == 5,
+	tostring(ns.Vendor:Count("food", 60)))
+
+-- A vendor holding less than the shortfall sells what it has.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 2)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a thin vendor sells what it has", ns.Vendor:Count("food", 60) == 2,
+	tostring(ns.Vendor:Count("food", 60)))
+
+-- Buff food is bought while the buff is missing; the biggest restore once it is banked.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+Stock(2, 2001, 45, 5, 20)   -- Buff Rations: 61 health, 12 stamina
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: buff food is bought when nothing is banked",
+	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 2001,
+	MERCHANT.bought[1] and tostring(MERCHANT.bought[1].itemID))
+
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+Stock(2, 2001, 45, 5, 20)
+Fed(600)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: the biggest restore is bought when the buff is banked",
+	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 9999,
+	MERCHANT.bought[1] and tostring(MERCHANT.bought[1].itemID))
+AURAS = {}
+
+-- Off by default: nothing is bought.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = {}
+ns.Vendor:Restock()
+Check("vendor: nothing is bought with the switch off", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
+Check("vendor: and nothing is said", #MESSAGES == 0, table.concat(MESSAGES, " / "))
+
+-- A target already met buys nothing and says nothing.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+Put(0, 1, 9999, 5)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a full bag buys nothing", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
+Check("vendor: a full bag says nothing", #MESSAGES == 0, table.concat(MESSAGES, " / "))
+
+-- Short money buys what it can and says how short it fell.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 100, 5, 20)
+MERCHANT.money = 250
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: short money buys what it can", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and says it fell short", Said("short"), table.concat(MESSAGES, " / "))
+
+-- Nothing good for the level is sold: the best usable one is bought as a fallback.
+Reset()
+PLAYER.level = 60
+Stock(1, 422, 10, 5, 20)   -- Dwarven Mild, level 15: outside the band
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a fallback is bought when nothing is in band", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and it says it was a fallback", Said("below your level"), table.concat(MESSAGES, " / "))
+
+-- Polestar handling it means BestBite does not buy.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+Polestar = { QoL = { Restock = { Get = function() return 20 end } } }
+ns.Vendor:Restock()
+Polestar = nil
+Check("vendor: Polestar handling it means nothing is bought", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
+Check("vendor: and the reason is said", Said("Polestar"), table.concat(MESSAGES, " / "))
+
+-- A fight stops it.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+COMBAT = true
+ns.Vendor:Restock()
+COMBAT = false
+Check("vendor: nothing is bought in combat", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
+
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)
