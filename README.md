@@ -4,7 +4,7 @@
 
 Uses the best food or water in your bags, for **World of Warcraft: Forever**.
 
-Two buttons sit above the action bar, one holding your best food and one your best water: click one to eat or drink. They are draggable, and a macro can press them:
+Two buttons hold your best food and your best water: click one to eat or drink. Drag them anywhere you like, and a macro can press them:
 
 ```text
 #showtooltip
@@ -17,6 +17,8 @@ Two buttons sit above the action bar, one holding your best food and one your be
 ```
 
 Both in one macro is just the two `/click` lines together. Right-drag a button to move it, or type `/bb move` to left-drag instead.
+
+Type `/bb` for the BestBite window: the two macros ready to copy, a switch for each setting, and a button for the rest. Drag it by its title bar, and Esc closes it.
 
 The game blocks an addon from using an item itself, which is why the buttons exist: the click has to come from you or a macro, never from the addon. BestBite only decides which item the button holds.
 
@@ -38,13 +40,13 @@ No dependencies.
 
 | Command | What it does |
 | --- | --- |
-| `/bb` | The commands and the macros to use. |
+| `/bb` | Opens the window: the macros to copy, and a button for each of these commands. |
 | `/bb food`, `/bb water`, `/bb consume` | Explain that eating takes a button or a macro, and which one. |
 | `/bb move` | Left-drag the buttons into place; again to lock them down. |
 | `/bb icons` | Action bar buttons show the item they will use. On by default. |
 | `/bb macroicon` | Also rewrite the macro's own icon, if this client allows it. Off by default. |
 | `/bb reset` | Forget what it has learned about items. |
-| `/bb debug` | What it sees: the buttons, your auras, the bars, every food or drink in the bags. |
+| `/bb debug` | Opens the window on its debug page: what it sees, and every food or drink in the bags. |
 
 `/bestbite` is a long form of `/bb`.
 
@@ -52,7 +54,7 @@ No dependencies.
 
 The button is holding no item, so there is nothing to use: no food or water you can use at your level in the bags, a potion rather than food, or an empty bag. Such a button stays where it is and greys out, and hovering it says what it is out of.
 
-`/bb debug` names what each button holds and lists every food or drink it found, with what it read from each tooltip.
+`/bb debug`, or the Debug button in the window, names what each button holds and lists every food or drink it found, with what it read from each tooltip.
 
 ## Tests
 
@@ -67,6 +69,6 @@ python Tests\run.py
 
 - Everything it prints goes to your own chat frame; nothing is sent to other players, and it never announces which item it used.
 - Button positions, the two icon settings and what it has learned are saved for the account in `BestBiteDB`.
-- It knows the food buff by its aura, "Well Fed"; `/bb debug` prints your auras if a client ever names it differently.
+- It knows the food buff by its aura, "Well Fed"; the window's debug page prints your auras if a client ever names it differently.
 - Chat messages are English only. Item tooltips are matched in English and a few other languages.
-- `Logo.png` is the logo shown above; `Icon.png` is the same art at 128 by 128, which is what the game shows in its addon list.
+- `Logo.png` is the logo shown above. `Portrait.png` is that art on a dark disc, which is what the window wears as its portrait, and `Icon.png` is the 128 by 128 image the game shows in its addon list.

@@ -148,7 +148,49 @@ local TOOLTIP = {
 	end,
 }
 
-CreateFrame = function(_, name, _, template)
+-- A frame of any other kind: the window builds itself out of these, so every method a
+-- frame might have answers instead of the harness having to list them all.
+local function Region(parent)
+	local region = { parent = parent }
+	region.SetPoint = function() end
+	region.SetAllPoints = function() end
+	region.SetSize = function(self, width, height) self.width, self.height = width, height end
+	region.SetWidth = function(self, width) self.width = width end
+	region.SetHeight = function(self, height) self.height = height end
+	region.SetColorTexture = function() end
+	region.SetTexture = function(self, texture) self.texture = texture end
+	region.SetFontObject = function() end
+	region.SetJustifyH = function() end
+	region.SetTextColor = function() end
+	region.SetText = function(self, text) self.text = tostring(text or "") end
+	region.GetText = function(self) return self.text end
+	region.GetParent = function(self) return self.parent end
+	region.GetStringHeight = function() return 0 end
+	region.GetHeight = function(self) return self.height or 0 end
+	region.Show = function(self) self.shown = true end
+	region.Hide = function(self) self.shown = false end
+	region.IsShown = function(self) return self.shown and true or false end
+	return region
+end
+
+local function InterfaceFrame(name)
+	local frame = Region(nil)
+	frame.shown = false
+	frame.scripts = {}
+	function frame:SetScript(event, fn) self.scripts[event] = fn end
+	function frame:Show() self.shown = true end
+	function frame:Hide() self.shown = false end
+	function frame:SetShown(flag) self.shown = flag and true or false end
+	function frame:IsShown() return self.shown end
+	function frame:CreateTexture() return Region(self) end
+	function frame:CreateFontString() return Region(self) end
+	function frame:SetScrollChild(child) self.scrollChild = child end
+	setmetatable(frame, { __index = function() return function() end end })
+	if name then _G[name] = frame end
+	return frame
+end
+
+CreateFrame = function(kind, name, _, template)
 	if template == "SecureActionButtonTemplate" then
 		local button = { attributes = {}, shown = true, key = name }
 		function button:SetAttribute(key, value) self.attributes[key] = value end
@@ -199,7 +241,8 @@ CreateFrame = function(_, name, _, template)
 		_G[name] = button
 		return button
 	end
-	return TOOLTIP
+	if kind == "GameTooltip" or template == "GameTooltipTemplate" then return TOOLTIP end
+	return InterfaceFrame(name)
 end
 
 TOOLTIP_LINES = {}
@@ -253,6 +296,7 @@ LoadAddon("Buffs.lua")
 LoadAddon("Consume.lua")
 LoadAddon("Buttons.lua")
 LoadAddon("Icons.lua")
+LoadAddon("Window.lua")
 
 local slash = SlashCmdList.BESTBITE
 
@@ -287,6 +331,15 @@ end
 local function Said(text)
 	for _, message in ipairs(MESSAGES) do
 		if message:find(text, 1, true) then return true end
+	end
+	return false
+end
+
+-- /bb debug writes its report into the window now, not the chat frame.
+local function Debugged(text)
+	ns.Window:ShowDebug()
+	for _, line in ipairs(ns.Window.debugLines or {}) do
+		if line:find(text, 1, true) then return true end
 	end
 	return false
 end
@@ -412,17 +465,28 @@ TIMERS = 0
 ns.Buffs:Refresh()
 Check("buff: no timer is set without a buff", TIMERS == 0, tostring(TIMERS))
 
+-- Aura data this client refuses to let arithmetic touch is skipped, not fatal: the restock
+-- and the report still work.
+AURAS = { setmetatable({}, { __index = function() error("secret", 0) end }) }
+Check("buff: an unreadable aura is skipped", ns.Buffs:Left() == nil, tostring(ns.Buffs:Left()))
+Check("buff: and the button still stocks", (function()
+	Put(0, 1, 2001)
+	ns.Buttons:Update()
+	return Food() == "item:2001"
+end)(), tostring(Food()))
+AURAS = {}
+
 -- /bb debug says what it makes of the buff.
 Reset()
 Put(0, 1, 2001)
 Fed(600)
 slash("debug")
 Check("buff: the debug reports the time left and the ranking",
-	Said("food buff: 600s left, so buff food waits"), MESSAGES[#MESSAGES])
+	Debugged("food buff: 600s left, so buff food waits"), table.concat(ns.Window.debugLines or {}, " / "))
 
 AURAS = {}
 slash("debug")
-Check("buff: the debug says when there is no buff", Said("food buff: none"))
+Check("buff: the debug says when there is no buff", Debugged("food buff: none"))
 
 -- A potion restores health but is not food.
 Reset()
@@ -605,28 +669,190 @@ AURAS = { { name = "Well Fed", icon = "Interface\\Icons\\INV_Misc_Food_15", dura
 	spellId = 232493 } }
 slash("debug")
 Check("auras: the debug lists the aura with its icon and time left",
-	Said("auras: Well Fed [INV_Misc_Food_15] 812s"), MESSAGES[#MESSAGES])
+	Debugged("auras: Well Fed [INV_Misc_Food_15] 812s"), table.concat(ns.Window.debugLines or {}, " / "))
 
 AURAS = {}
 slash("debug")
-Check("auras: the debug says when there are none", Said("auras: none"))
+Check("auras: the debug says when there are none", Debugged("auras: none"))
 
 -- /bb debug reports what it sees, including what the buttons would click.
 Reset()
 Put(0, 1, 422); Put(0, 2, 8766); Put(0, 3, 118)
 ns.Buttons:Update()
 slash("debug")
-Check("debug: reports the loaded files", Said("files: Core ok, Detect ok, Consume ok, Buttons ok, Icons ok"))
-Check("debug: reports the stocked buttons", Said("buttons: food item:422"), MESSAGES[2])
-Check("debug: names the food it found", Said("Dwarven Mild"))
-Check("debug: says the potion is not food", not Said("Minor Healing Potion"))
+Check("debug: reports the loaded files", Debugged("files: Core ok, Detect ok, Consume ok, Buttons ok, Icons ok"))
+Check("debug: reports the stocked buttons", Debugged("buttons: food item:422"))
+Check("debug: names the food it found", Debugged("Dwarven Mild"))
+Check("debug: says the potion is not food", not Debugged("Minor Healing Potion"))
 
 local realConsume = ns.Consume
 ns.Consume = nil
 MESSAGES = {}
 slash("debug")
-Check("debug: survives a missing Consume module", Said("Consume MISSING"))
+Check("debug: survives a missing Consume module", Debugged("Consume MISSING"))
 ns.Consume = realConsume
+
+-- The window is the interface: /bb opens it, /bb again closes it, and its buttons run
+-- the commands so they need not be typed.
+Reset()
+Put(0, 1, 422); Put(0, 2, 8766)
+ns.Buttons:Update()
+MESSAGES = {}
+
+slash("")
+Check("window: /bb opens it", ns.Window.frame ~= nil and ns.Window.frame.shown == true)
+Check("window: it opens on the commands page", ns.Window.page == "main")
+Check("window: the eat box holds the macro to copy", ns.Window.macroFood:GetText() == "/click BestBiteFood",
+	ns.Window.macroFood:GetText())
+Check("window: the drink box holds the macro to copy", ns.Window.macroWater:GetText() == "/click BestBiteWater",
+	ns.Window.macroWater:GetText())
+Check("window: opening it prints nothing to chat", #MESSAGES == 0, table.concat(MESSAGES, " / "))
+
+slash("")
+Check("window: /bb again closes it", ns.Window.frame.shown == false)
+
+Check("window: Esc closes it, as a pane the client knows", (function()
+	for _, name in ipairs(UISpecialFrames or {}) do
+		if name == "BestBiteFrame" then return true end
+	end
+	return false
+end)())
+
+slash("")
+ns.Window.switches.icons.scripts.OnClick()
+Check("window: the action bar switch turns the setting off", ns.db.showIcons == false)
+Check("window: the switch shows it off", ns.Window.switches.icons.on == false and ns.Window.switches.icons.tick.shown ~= true)
+
+ns.Window.switches.icons.scripts.OnClick()
+Check("window: and back on again", ns.db.showIcons == true)
+Check("window: the switch shows it on", ns.Window.switches.icons.on == true and ns.Window.switches.icons.tick.shown == true)
+
+ns.Window.switches.macroicon.scripts.OnClick()
+Check("window: the macro icon switch turns that setting on", ns.db.writeMacroIcons == true
+	and ns.Window.switches.macroicon.on == true, tostring(ns.db.writeMacroIcons))
+ns.Window.switches.macroicon.scripts.OnClick()
+Check("window: and off again", ns.db.writeMacroIcons == false and ns.Window.switches.macroicon.on == false)
+
+-- A setting changed in chat shows in the window next time it is opened.
+ns.Window.frame:Hide()
+ns.db.showIcons = false
+slash("")
+Check("window: the switch follows a setting changed in chat", ns.Window.switches.icons.on == false)
+ns.db.showIcons = true
+ns.Window.frame:Hide()
+
+ns.Window.buttons.move.scripts.OnClick()
+Check("window: the move button turns move mode on", ns.Buttons.moving == true)
+ns.Window.buttons.move.scripts.OnClick()
+Check("window: and off again", ns.Buttons.moving == false)
+
+ns.db.learned[422] = { kind = "food", amount = 61 }
+ns.Window.buttons.reset.scripts.OnClick()
+Check("window: reset forgets what it learned", next(ns.db.learned) == nil)
+
+ns.Window.buttons.debug.scripts.OnClick()
+Check("window: the debug button shows the debug page", ns.Window.page == "debug")
+Check("window: the debug page is filled", #(ns.Window.debugLines or {}) > 0)
+Check("window: the report is tall enough to be seen", (ns.Window.text:GetParent().height or 0) > 100,
+	tostring(ns.Window.text:GetParent().height))
+Check("window: the report carries the file lines",
+	(ns.Window.text:GetText() or ""):find("files:", 1, true) ~= nil)
+
+slash("")
+Check("window: /bb on the debug page goes back to the commands", ns.Window.page == "main" and ns.Window.frame.shown == true)
+
+ns.Window.buttons.debug.scripts.OnClick()
+ns.Window.backButton.scripts.OnClick()
+Check("window: back returns to the commands page", ns.Window.page == "main")
+
+-- A report line the client refuses to read does not sink the page: it becomes a note and
+-- the rest of the report still shows. This is how the "secret value" failure appears.
+local realLines = ns.BestBite.DebugLines
+ns.BestBite.DebugLines = function()
+	return { "files: Core ok", "buttons: food item:422", "macros: /click BestBiteFood", {} }
+end
+MESSAGES = {}
+ns.Window:ShowDebug()
+Check("window: an unreadable line is noted, not fatal", ns.Window.page == "debug")
+Check("window: the note names the line",
+	(ns.Window.text:GetText() or ""):find("line 4 could not be read", 1, true) ~= nil,
+	ns.Window.text:GetText())
+Check("window: the readable lines still show", (ns.Window.text:GetText() or ""):find("files: Core ok", 1, true) ~= nil)
+ns.BestBite.DebugLines = realLines
+ns.Window:ShowPage("main")
+
+-- A "secret" value survives tostring and `..` but is refused on use. Patching table.concat
+-- to refuse a marker string reproduces exactly what the client did to the report.
+local realConcat = table.concat
+local SECRET = "SECRET-VALUE"
+table.concat = function(list, sep, first, last)
+	if type(list) == "table" then
+		for _, value in pairs(list) do
+			if value == SECRET then error("invalid value (secret)", 0) end
+		end
+	end
+	return realConcat(list, sep, first, last)
+end
+
+Check("debug: a secret value is not showable", ns.API.Showable(SECRET) == false)
+Check("debug: a plain string is showable", ns.API.Showable("hello") == true)
+Check("debug: a table is not showable", ns.API.Showable({}) == false)
+
+ns.BestBite.DebugLines = function() return { "files: Core ok", SECRET, "best food: none" } end
+ns.Window:ShowDebug()
+Check("window: a secret line becomes a note, not the whole page",
+	(ns.Window.text:GetText() or ""):find("line 2 could not be read", 1, true) ~= nil, ns.Window.text:GetText())
+Check("window: the lines around a secret still show",
+	(ns.Window.text:GetText() or ""):find("best food: none", 1, true) ~= nil, ns.Window.text:GetText())
+
+-- The health line marks a secret rather than passing it into the report.
+ns.BestBite.DebugLines = realLines
+local realHealthValue = UnitHealth
+UnitHealth = function() return SECRET end
+local secretReport = ns.BestBite:DebugLines()
+UnitHealth = realHealthValue
+table.concat = realConcat
+
+local secretHealth
+for _, line in ipairs(secretReport) do
+	if type(line) == "string" and line:find("health", 1, true) then secretHealth = line end
+end
+Check("debug: a secret health value is marked", secretHealth ~= nil and secretHealth:find("health %?/", 1) ~= nil,
+	tostring(secretHealth))
+
+-- The health line reads its values through a guard, so a call the client refuses leaves a
+-- placeholder rather than an error.
+local realHealth = UnitHealth
+UnitHealth = function() error("secret", 0) end
+MESSAGES = {}
+local guarded = ns.BestBite:DebugLines()
+UnitHealth = realHealth
+local healthLine
+for _, line in ipairs(guarded) do
+	if line:find("health", 1, true) then healthLine = line end
+end
+Check("debug: a refused value becomes a placeholder", healthLine ~= nil and healthLine:find("health %?/", 1) ~= nil,
+	tostring(healthLine))
+
+realLines = ns.BestBite.DebugLines
+ns.BestBite.DebugLines = function() error("boom", 0) end
+MESSAGES = {}
+ns.Window.buttons.debug.scripts.OnClick()
+Check("window: a broken report still shows the debug page", ns.Window.page == "debug")
+Check("window: and says why on the page",
+	(ns.Window.debugLines and ns.Window.debugLines[1] or ""):find("could not be built", 1, true) ~= nil,
+	tostring(ns.Window.debugLines and ns.Window.debugLines[1]))
+Check("window: and says why in chat too", Said("could not be built"))
+ns.BestBite.DebugLines = realLines
+ns.Window:ShowPage("main")
+
+-- Without the window, every command still answers in chat.
+local realWindow = ns.Window
+ns.Window = nil
+MESSAGES = {}
+slash("")
+Check("window: without it, /bb falls back to chat", Said("uses the best food or water you carry"))
+ns.Window = realWindow
 
 -- A command that would use an item says what to put in a macro instead.
 Reset()

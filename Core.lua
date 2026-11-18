@@ -170,6 +170,16 @@ function API.Auras(filter)
 	return list
 end
 
+-- Whether a value can be shown at all. This client keeps some values "secret": they
+-- survive tostring and `..`, but every use of one is refused, table.concat included. A
+-- client without the check still refuses one at the point of use, which is what the probe
+-- catches.
+function API.Showable(value)
+	if issecretvalue and issecretvalue(value) then return false end
+	if type(value) ~= "string" then return false end
+	return pcall(table.concat, { value }, "") and true or false
+end
+
 -- The saved variables, filled in on first use so the file needs no load event.
 function BestBite:Db()
 	if ns.db then return ns.db end
@@ -251,10 +261,20 @@ end
 -- Everything the addon sees, for when a command seems to do nothing: which files
 -- loaded, the setting, the bars, and every food or drink in the bags. It lives
 -- here rather than beside the rest so it still answers when a later file fails.
-function BestBite:Debug()
-	local frame = DEFAULT_CHAT_FRAME
-	local function Say(text)
-		frame:AddMessage("|cff7fd4ffBestBite|r debug: " .. text)
+-- It returns lines rather than printing them, so the window and the chat fallback
+-- show the same report.
+function BestBite:DebugLines()
+	local lines = {}
+	local function Say(text) lines[#lines + 1] = text end
+
+	-- This client keeps some unit values "secret", and any use of one is refused, so they
+	-- are read through a guard and marked rather than taking the report down.
+	local function Asked(read, fallback)
+		local ok, value = pcall(read)
+		if not ok or value == nil then return fallback end
+		local readText, text = pcall(tostring, value)
+		if not readText or not API.Showable(text) then return fallback end
+		return text
 	end
 
 	Say(("files: Core ok, Detect %s, Consume %s, Buttons %s, Icons %s"):format(
@@ -265,10 +285,12 @@ function BestBite:Debug()
 		Say(("buttons: food %s | water %s"):format(food or "empty", water or "empty"))
 		Say("macros: /click BestBiteFood and /click BestBiteWater")
 	end
-	Say(("health %d/%d | mana %d/%d | hasMana %s"):format(
-		UnitHealth("player"), UnitHealthMax("player"),
-		UnitPower("player", 0), UnitPowerMax("player", 0),
-		API.HasMana() and "yes" or "no"))
+	Say(("health %s/%s | mana %s/%s | hasMana %s"):format(
+		Asked(function() return UnitHealth("player") end, "?"),
+		Asked(function() return UnitHealthMax("player") end, "?"),
+		Asked(function() return UnitPower("player", 0) end, "?"),
+		Asked(function() return UnitPowerMax("player", 0) end, "?"),
+		Asked(function() return API.HasMana() and "yes" or "no" end, "?")))
 
 	-- What the player is under, with the icon and time left: this is how a food buff is
 	-- told apart from any other, and how long it has to run.
@@ -278,12 +300,14 @@ function BestBite:Debug()
 	else
 		local parts = {}
 		for _, aura in ipairs(auras) do
-			local left = aura.duration and aura.duration > 0 and aura.expires
-				and math.max(0, math.floor(aura.expires - GetTime()))
-			parts[#parts + 1] = ("%s [%s] %s"):format(
-				tostring(aura.name),
-				tostring(aura.icon or "?"):match("[^\\]+$") or "?",
-				left and (left .. "s") or "no timer")
+			parts[#parts + 1] = Asked(function()
+				local left = aura.duration and aura.duration > 0 and aura.expires
+					and math.max(0, math.floor(aura.expires - GetTime()))
+				return ("%s [%s] %s"):format(
+					tostring(aura.name),
+					tostring(aura.icon or "?"):match("[^\\]+$") or "?",
+					left and (left .. "s") or "no timer")
+			end, "an aura that could not be read")
 		end
 		Say("auras: " .. table.concat(parts, ", "))
 	end
@@ -291,11 +315,14 @@ function BestBite:Debug()
 	-- Which food the button should hold turns on this: a banked buff means plain food
 	-- leads, a missing or nearly spent one means buff food does.
 	if ns.Buffs then
-		local left = ns.Buffs:Left()
-		if left then
+		local ok, left = pcall(ns.Buffs.Left, ns.Buffs)
+		local banked = ok and select(1, pcall(ns.Buffs.Banked, ns.Buffs))
+		if not ok then
+			Say("food buff: could not be read")
+		elseif left then
 			Say(("food buff: %s left, so buff food %s"):format(
 				left == math.huge and "no timer" or (math.floor(left) .. "s"),
-				ns.Buffs:Banked() and "waits" or "leads"))
+				banked and "waits" or "leads"))
 		else
 			Say("food buff: none, so buff food leads")
 		end
@@ -320,12 +347,15 @@ function BestBite:Debug()
 					end
 				end
 				local points = ns.Detect and ns.Detect:Points(buffs) or 0
-				Say(("%d/%d %s: %s, %s %s | usable %s | level %s | x%d%s%s"):format(
-					bag, slot, item.itemID, name or "?", kind, amount or "?",
-					API.IsUsable(item.itemID) and "yes" or "NO",
-					requiredLevel or 0, item.count or 0,
-					points > 0 and (" | buffs " .. points) or "",
-					item.locked and " | LOCKED" or ""))
+				local label = ("%d/%d"):format(bag, slot)
+				Say(Asked(function()
+					return ("%s %s: %s, %s %s | usable %s | level %s | x%d%s%s"):format(
+						label, item.itemID, name or "?", kind, amount or "?",
+						API.IsUsable(item.itemID) and "yes" or "NO",
+						requiredLevel or 0, item.count or 0,
+						points > 0 and (" | buffs " .. points) or "",
+						item.locked and " | LOCKED" or "")
+				end, label .. ": an item that could not be read"))
 			end
 		end
 	end
@@ -338,7 +368,17 @@ function BestBite:Debug()
 		if not pick then return "none" end
 		return ("bag %d slot %d, %s"):format(pick.bag, pick.slot, tostring(pick.amount))
 	end
-	Say("best food: " .. Best("food") .. " | best water: " .. Best("water"))
+	Say(Asked(function()
+		return "best food: " .. Best("food") .. " | best water: " .. Best("water")
+	end, "best food and water: could not be read"))
+	return lines
+end
+
+-- The report in chat, for when the window cannot be shown.
+function BestBite:Debug()
+	for _, line in ipairs(BestBite:DebugLines()) do
+		DEFAULT_CHAT_FRAME:AddMessage("|cff7fd4ffBestBite|r debug: " .. line)
+	end
 end
 
 -- For macros and /run: BestBite.Eat(), BestBite.Drink(), BestBite.Consume().
@@ -384,9 +424,9 @@ local function RunCommand(message)
 		BestBite:Print("Rewriting the macro's own icon: " .. (db.writeMacroIcons and "on" or "off"))
 		if db.writeMacroIcons and ns.Icons then ns.Icons:Request(0) end
 	elseif command == "debug" then
-		BestBite:Debug()
+		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else
-		BestBite:Help()
+		if not (ns.Window and ns.Window:Toggle()) then BestBite:Help() end
 	end
 end
 
@@ -402,3 +442,7 @@ end
 SLASH_BESTBITE1 = "/bb"
 SLASH_BESTBITE2 = "/bestbite"
 SlashCmdList.BESTBITE = HandleCommand
+
+-- The window's own buttons run the same commands as the slash line, through the same
+-- guard that turns a thrown error into a line in chat.
+ns.RunCommand = HandleCommand

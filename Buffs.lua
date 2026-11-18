@@ -27,13 +27,16 @@ function Buffs:Left(now)
 	now = now or GetTime()
 	local best
 	for _, aura in ipairs(API.Auras("HELPFUL")) do
-		if FED[tostring(aura.name or ""):lower()] then
-			local left = math.huge
+		-- Aura data can arrive as a value the client will not let arithmetic near; an aura
+		-- that cannot be read is skipped rather than taking the restock down with it.
+		local ok, fed, left = pcall(function()
+			if not FED[tostring(aura.name or ""):lower()] then return false end
 			if aura.duration and aura.duration > 0 then
-				left = math.max(0, (aura.expires or (now + aura.duration)) - now)
+				return true, math.max(0, (aura.expires or (now + aura.duration)) - now)
 			end
-			if not best or left > best then best = left end
-		end
+			return true, math.huge
+		end)
+		if ok and fed and (not best or left > best) then best = left end
 	end
 	return best
 end
