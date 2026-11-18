@@ -23,8 +23,10 @@ Vendor.TARGET_MIN = 5
 Vendor.TARGET_MAX = 100
 Vendor.TARGET_STEP = 5
 
--- Set once a weak item has been bought this visit, so MERCHANT_UPDATE cannot buy it again.
-Vendor.fallbackDone = false
+-- Set once a weak item has been bought this visit, per kind, so MERCHANT_UPDATE cannot buy
+-- it again. Per kind rather than once for the visit: a vendor whose food and water are both
+-- below the level still owes you one attempt at each.
+Vendor.fallbackDone = {}
 
 -- A purchase is taken by the client at once but put in the bags a moment later, so what has
 -- been bought and not yet landed is remembered per item; MERCHANT_UPDATE re-reads the bags,
@@ -222,23 +224,25 @@ function Vendor:Pick(kind)
 
 	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
 		local itemID, price, stack, available = self:Merchant(index)
-		-- Usability is not asked of a merchant item: the level band already decides whether
-		-- it is good for this character, and a client answering no to a lookup it does not
-		-- really support would empty the vendor.
 		if itemID and Sold(available) and API.IsFoodDrink(itemID) then
 			local itemKind, amount, buffs = Detect:ScanMerchant(index)
 			if itemKind == kind then
-				local _, itemLevel = API.ItemInfo(itemID)
-				local candidate = {
-					index = index, itemID = itemID, price = price, stack = stack,
-					available = available, amount = amount or 0,
-					points = Detect:Points(buffs), itemLevel = itemLevel or 0,
-					count = available,
-				}
-				if self:LevelAppropriate(itemID, level) then
-					if Consume:Better(candidate, best, preferBuffs) then best = candidate end
-				elseif Consume:Better(candidate, fallback, preferBuffs) then
-					fallback = candidate
+				local name, itemLevel, required = API.ItemInfo(itemID)
+				-- The level the item itself needs decides whether it can be used at all, in
+				-- the band or not; the client's "is it usable" lookup is not asked, since a
+				-- client that only half answers it empties the vendor.
+				if not (required and required > level) then
+					local candidate = {
+						index = index, itemID = itemID, price = price, stack = stack,
+						available = available, amount = amount or 0,
+						points = Detect:Points(buffs), itemLevel = itemLevel or 0,
+						count = available,
+					}
+					if self:LevelAppropriate(itemID, level) then
+						if Consume:Better(candidate, best, preferBuffs) then best = candidate end
+					elseif Consume:Better(candidate, fallback, preferBuffs) then
+						fallback = candidate
+					end
 				end
 			end
 		end
@@ -349,7 +353,7 @@ function Vendor:Restock(explicit)
 	self:ReportLanded()
 
 	-- An explicit purchase always gets a fresh attempt at a fallback.
-	if explicit then self.fallbackDone = false end
+	if explicit then wipe(self.fallbackDone) end
 
 	local stood, why = self:StandDown()
 	if stood then
@@ -362,13 +366,20 @@ function Vendor:Restock(explicit)
 		local shortfall = self:Shortfall(kind)
 		if shortfall > 0 then
 			local pick, fellBack = self:Pick(kind)
+			-- A weak item is only worth buying into an empty cupboard: if something usable of
+			-- that kind is already carried, a second-rate stack beside it is money spent for
+			-- nothing, and every visit would add another.
+			if pick and fellBack and not explicit and Consume:Find(kind) then
+				pick, fellBack = nil, false
+				said[#said + 1] = "your " .. kind .. " is below your level, so none was bought"
+			end
 			-- A fallback never counts towards the target, so a second pass of this visit would
-			-- buy the same weak item again: one such purchase per visit is enough.
-			if pick and not (fellBack and self.fallbackDone) then
+			-- buy the same weak item again: one such purchase per kind per visit is enough.
+			if pick and not (fellBack and self.fallbackDone[kind]) then
 				local bought, left, reason = self:Buy(pick, shortfall)
 				if bought > 0 then
 					didSomething = true
-					if fellBack then self.fallbackDone = true end
+					if fellBack then self.fallbackDone[kind] = true end
 					-- The purchase is reported once it lands, so what is worth saying about it
 					-- waits with it rather than in a line of its own.
 					local record = pending[pick.itemID]
@@ -446,26 +457,33 @@ function Vendor:Lines()
 	for index = 1, merchant do
 		local itemID, price, stack, available = self:Merchant(index)
 		if itemID then
+			local _, _, required = API.ItemInfo(itemID)
+			local note = ""
+			if required and required > level then
+				note = ", needs level " .. required
+			elseif not self:LevelAppropriate(itemID, level) then
+				note = ", outside your band"
+			end
 			lines[#lines + 1] = ("[%d] %s (%d) %s: %d per %d, %d available%s"):format(index,
 				(API.ItemInfo(itemID)) or "unread", itemID, Detect:ScanMerchant(index) or "not food or water",
-				price or 0, stack or 1, available or 0,
-				self:LevelAppropriate(itemID, level) and "" or ", outside your band")
+				price or 0, stack or 1, available or 0, note)
 		end
 	end
 
 	-- Why a kind came back with nothing to buy, counted the way the buy does it.
 	for _, kind in ipairs({ "food", "water" }) do
-		local readable, soldOut, unusable = 0, 0, 0
+		local readable, soldOut, tooHigh = 0, 0, 0
 		for index = 1, merchant do
 			local itemID, _, _, available = self:Merchant(index)
 			if itemID and Detect:ScanMerchant(index) == kind then
 				readable = readable + 1
+				local _, _, required = API.ItemInfo(itemID)
 				if not Sold(available) then soldOut = soldOut + 1 end
-				if not API.IsUsable(itemID) then unusable = unusable + 1 end
+				if required and required > level then tooHigh = tooHigh + 1 end
 			end
 		end
-		lines[#lines + 1] = ("%s: %d readable, %d sold out, %d not usable by you"):format(
-			kind, readable, soldOut, unusable)
+		lines[#lines + 1] = ("%s: %d readable, %d sold out, %d need a higher level"):format(
+			kind, readable, soldOut, tooHigh)
 	end
 	return lines
 end
@@ -510,6 +528,6 @@ events:SetScript("OnEvent", function(_, event)
 		return
 	end
 	-- Opening a merchant starts a new visit, so a weak item may be bought once again.
-	if event == "MERCHANT_SHOW" then Vendor.fallbackDone = false end
+	if event == "MERCHANT_SHOW" then wipe(Vendor.fallbackDone) end
 	Vendor:Request()
 end)

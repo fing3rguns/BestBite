@@ -481,7 +481,7 @@ local function Reset()
 	COMBAT = false
 	BestBiteDB, ns.db = nil, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
-	ns.Vendor.fallbackDone = false
+	ns.Vendor.fallbackDone = {}
 	wipe(ns.Vendor.pending)
 end
 
@@ -1388,17 +1388,26 @@ ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 Fire("MERCHANT_SHOW")
 Check("vendor: a visit buys the weak item", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and the flag is set", ns.Vendor.fallbackDone == true)
+Check("vendor: and the flag is set", ns.Vendor.fallbackDone.food == true)
 Fire("MERCHANT_UPDATE")
 Check("vendor: MERCHANT_UPDATE does not buy it again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 MERCHANT.stock = {}
 Fire("MERCHANT_SHOW")
-Check("vendor: MERCHANT_SHOW clears the one-fallback-a-visit flag", ns.Vendor.fallbackDone == false)
+Check("vendor: MERCHANT_SHOW clears the one-fallback-a-visit flag", ns.Vendor.fallbackDone.food == nil)
 Check("vendor: and a merchant with nothing to sell buys nothing", #MERCHANT.bought == 1,
 	tostring(#MERCHANT.bought))
 Stock(1, 422, 50, 5, 20)
 Fire("MERCHANT_SHOW")
-Check("vendor: so a new visit buys it again", #MERCHANT.bought == 2, tostring(#MERCHANT.bought))
+Check("vendor: a new visit does not buy another weak stack beside the one carried",
+	#MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and says the carried food is below the level", Said("below your level"),
+	table.concat(MESSAGES, " / "))
+MERCHANT.bought = {}
+Check("vendor: a Buy now press buys the weak item again anyway",
+	(function()
+		ns.Vendor:Restock(true)
+		return #MERCHANT.bought == 1
+	end)(), tostring(#MERCHANT.bought))
 
 -- The window's counts are stale as soon as a purchase lands, and money changing is not a
 -- reason to leave them so.
@@ -1535,6 +1544,34 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: the client's own item table is read when the tuple is missing",
 	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
+
+-- The innkeeper as a level 24 sees him: every food and drink he sells is below the band, and
+-- both kinds are still bought once, which is "there is clearly food and water to be bought".
+Reset()
+PLAYER.level = 24
+Stock(1, 2003, 23, 5, -1)   -- Plain Loaf, level 1: below the band at 24
+Stock(2, 159, 23, 5, -1)    -- Refreshing Spring Water, level 1
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+local boughtKinds = {}
+for _, buy in ipairs(MERCHANT.bought) do boughtKinds[buy.itemID] = true end
+Check("vendor: food and water below the band are both bought", boughtKinds[2003] and boughtKinds[159],
+	table.concat(MESSAGES, " / "))
+Check("vendor: and both are said to be below the level", Said("below your level"),
+	table.concat(MESSAGES, " / "))
+
+-- An item needing a higher level is not a fallback: it cannot be used at all.
+Reset()
+PLAYER.level = 24
+Stock(1, 9999, 40, 5, -1)   -- Raid Food, needs level 60
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: an item needing a higher level is never bought", #MERCHANT.bought == 0,
+	tostring(#MERCHANT.bought))
+Check("vendor: and the vendor reads as having nothing to buy", Said("no food here it could buy"),
+	table.concat(MESSAGES, " / "))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
