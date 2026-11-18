@@ -243,6 +243,7 @@ function BestBite:Help()
 	frame:AddMessage("  /bb reset - forget the items it has learned")
 	frame:AddMessage("  /bb debug - report what it sees")
 	frame:AddMessage("  /bb vendor - what restocking sees at the vendor that is open")
+	frame:AddMessage("  /bb notice - show the bubble a purchase raises, buying nothing")
 end
 
 -- Why the commands cannot do the job themselves, and the macro that can, said once
@@ -439,6 +440,18 @@ local function RunCommand(message)
 	elseif command == "vendor" then
 		local lines = ns.Vendor and ns.Vendor:Lines() or { "Vendor.lua did not load" }
 		for _, line in ipairs(lines) do BestBite:Print("vendor: " .. line) end
+	elseif command == "notice" then
+		-- Shows the bubble a purchase would raise, with made-up numbers and nothing bought,
+		-- so its look can be seen without waiting for a vendor and spending real money.
+		local vendor = ns.Vendor
+		if not vendor then
+			BestBite:Print("Vendor.lua did not load")
+			return
+		end
+		vendor:ClearNotice()
+		vendor:Notice(("bought %d %s for %s: it was below your level"):format(5,
+			"Homemade Cherry Pie", vendor.Coins(36)))
+		vendor:Notice(("bought %d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
 	elseif command == "debug" then
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else

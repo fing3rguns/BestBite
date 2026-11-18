@@ -1608,6 +1608,17 @@ Check("vendor: gold and silver are broken out", ns.Vendor.Coins(77575):find("7|T
 	and ns.Vendor.Coins(77575):find("75|T", 1, true) ~= nil, ns.Vendor.Coins(77575))
 Check("vendor: no bare c suffix is left", not ns.Vendor.Coins(450):find("c$"), ns.Vendor.Coins(450))
 
+-- /bb notice shows the bubble with made-up numbers, so its look can be checked without a
+-- vendor and without spending anything.
+Reset()
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+slash("notice")
+Check("vendor: /bb notice raises the bubble", Noticed("bought 5 Homemade Cherry Pie"), NoticeText())
+Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
+Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
+	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
+
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)
