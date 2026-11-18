@@ -55,6 +55,13 @@ local function Textured(region)
 	return type(region) == "table" and region.SetTexture ~= nil and region or nil
 end
 
+-- Every window action runs behind one guard: a client that answers differently must not
+-- reach the client's error handler, so the failure is one line in chat instead.
+local function Guarded(run)
+	local ok, err = pcall(run)
+	if not ok then BestBite:Print("error: " .. tostring(err)) end
+end
+
 -- The logo as the frame's portrait. This client's portrait frame names its own method for
 -- taking a raw texture; the newer call and the plain texture regions are the fallbacks, so
 -- whichever the client has is used.
@@ -196,11 +203,13 @@ local function Build(self)
 	-- Restocking at vendors: a switch, how much of each to keep, and one press that buys
 	-- now rather than waiting for a merchant to be opened.
 	switches.vendor = Switch(main, "Restock from vendors", function()
-		local vendor = ns.Vendor
-		if not vendor then return end
-		local db = vendor:Db()
-		db.on = not db.on
-		Window:Refresh()
+		Guarded(function()
+			local vendor = ns.Vendor
+			if not vendor then return end
+			local db = vendor:Db()
+			db.on = not db.on
+			Window:Refresh()
+		end)
 	end)
 	switches.vendor:SetPoint("TOPLEFT", switches.icons, "BOTTOMLEFT", 0, -16)
 
@@ -213,12 +222,14 @@ local function Build(self)
 
 	local function StepTarget(delta)
 		return function()
-			local vendor = ns.Vendor
-			if not vendor then return end
-			local db = vendor:Db()
-			local nextTarget = (db.target or vendor.TARGET_MIN) + delta
-			db.target = math.max(vendor.TARGET_MIN, math.min(vendor.TARGET_MAX, nextTarget))
-			Window:Refresh()
+			Guarded(function()
+				local vendor = ns.Vendor
+				if not vendor then return end
+				local db = vendor:Db()
+				local nextTarget = (db.target or vendor.TARGET_MIN) + delta
+				db.target = math.max(vendor.TARGET_MIN, math.min(vendor.TARGET_MAX, nextTarget))
+				Window:Refresh()
+			end)
 		end
 	end
 	buttons.vendorLess = Command("vendorLess", "-", 26)
@@ -234,8 +245,10 @@ local function Build(self)
 	buttons.vendorBuy = Command("vendorBuy", "Buy now", 100)
 	buttons.vendorBuy:SetPoint("LEFT", buttons.vendorMore, "RIGHT", 10, 0)
 	buttons.vendorBuy:SetScript("OnClick", function()
-		if ns.Vendor then ns.Vendor:Restock(true) end
-		Window:Refresh()
+		Guarded(function()
+			if ns.Vendor then ns.Vendor:Restock(true) end
+			Window:Refresh()
+		end)
 	end)
 
 	buttons.move = Command("move", "Move buttons")
@@ -396,35 +409,42 @@ function Window:Refresh()
 	if self.switches.macroicon then self.switches.macroicon:SetState(db.writeMacroIcons == true) end
 
 	if self.switches.vendor and ns.Vendor then
-		local vendor = ns.Vendor
-		local settings = vendor:Db()
-		self.switches.vendor:SetState(settings.on == true)
-		self.targetLabel:SetText(("%d of each"):format(settings.target or vendor.TARGET_MIN))
+		-- The status line is drawn from the merchant and the bags, both of which can refuse
+		-- what is asked of them; the rest of the window still refreshes when they do.
+		Guarded(function() Window:RefreshVendor() end)
+	end
+end
 
-		local open = GetMerchantNumItems and GetMerchantNumItems() > 0
-		if self.buttons and self.buttons.vendorBuy then
-			if open then self.buttons.vendorBuy:Enable() else self.buttons.vendorBuy:Disable() end
-		end
+-- The vendor section: its switch, its target, its button and the counts behind them.
+function Window:RefreshVendor()
+	local vendor = ns.Vendor
+	local settings = vendor:Db()
+	self.switches.vendor:SetState(settings.on == true)
+	self.targetLabel:SetText(("%d of each"):format(settings.target or vendor.TARGET_MIN))
 
-		if self.vendorStatus then
-			local stood, why = vendor:StandDown()
-			local text
-			if stood then
-				text = why .. ", so BestBite stands down."
-			elseif open then
-				local target = settings.target or vendor.TARGET_MIN
-				-- An unknown level counts nothing, rather than counting at level 0.
-				local level = UnitLevel("player") or 0
-				local food, water = 0, 0
-				if level > 0 then
-					food, water = vendor:Count("food", level, true), vendor:Count("water", level, true)
-				end
-				text = ("Food %d/%d, water %d/%d"):format(food, target, water, target)
-			else
-				text = "No merchant open"
+	local open = GetMerchantNumItems and GetMerchantNumItems() > 0
+	if self.buttons and self.buttons.vendorBuy then
+		if open then self.buttons.vendorBuy:Enable() else self.buttons.vendorBuy:Disable() end
+	end
+
+	if self.vendorStatus then
+		local stood, why = vendor:StandDown()
+		local text
+		if stood then
+			text = why .. ", so BestBite stands down."
+		elseif open then
+			local target = settings.target or vendor.TARGET_MIN
+			-- An unknown level counts nothing, rather than counting at level 0.
+			local level = UnitLevel("player") or 0
+			local food, water = 0, 0
+			if level > 0 then
+				food, water = vendor:Count("food", level, true), vendor:Count("water", level, true)
 			end
-			self.vendorStatus:SetText(text)
+			text = ("Food %d/%d, water %d/%d"):format(food, target, water, target)
+		else
+			text = "No merchant open"
 		end
+		self.vendorStatus:SetText(text)
 	end
 end
 

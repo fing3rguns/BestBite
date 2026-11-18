@@ -808,7 +808,7 @@ Reset()
 Put(0, 1, 422); Put(0, 2, 8766); Put(0, 3, 118)
 ns.Buttons:Update()
 slash("debug")
-Check("debug: reports the loaded files", Debugged("files: Core ok, Detect ok, Consume ok, Buttons ok, Icons ok"))
+Check("debug: reports the loaded files", Debugged("files: Core ok, Detect ok, Consume ok, Vendor ok, Buttons ok, Icons ok"))
 Check("debug: reports the stocked buttons", Debugged("buttons: food item:422"))
 Check("debug: names the food it found", Debugged("Dwarven Mild"))
 Check("debug: says the potion is not food", not Debugged("Minor Healing Potion"))
@@ -1383,6 +1383,23 @@ Fire("PLAYER_MONEY")
 Check("vendor: a change of money refreshes the status line",
 	ns.Window.vendorStatus:GetText() == "Food 5/5, water 2/5", ns.Window.vendorStatus:GetText())
 Check("vendor: and money alone buys nothing", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+
+-- A client that refuses what the window asks of it is one line in chat, not an error out of
+-- the window's own handler.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Window:Open()
+local realMerchant = GetMerchantNumItems
+GetMerchantNumItems = function() error("the merchant frame is gone", 0) end
+local refreshed = pcall(ns.Window.Refresh, ns.Window)
+Check("window: a failing vendor refresh is reported, not raised", refreshed, tostring(refreshed))
+Check("window: and says so in chat", Said("error:"), table.concat(MESSAGES, " / "))
+local boughtOK = pcall(ns.Window.buttons.vendorBuy.scripts.OnClick)
+Check("window: a failing Buy now is reported, not raised", boughtOK, tostring(boughtOK))
+GetMerchantNumItems = realMerchant
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

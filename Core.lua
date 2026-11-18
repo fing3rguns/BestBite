@@ -280,8 +280,9 @@ function BestBite:DebugLines()
 		return text
 	end
 
-	Say(("files: Core ok, Detect %s, Consume %s, Buttons %s, Icons %s"):format(
+	Say(("files: Core ok, Detect %s, Consume %s, Vendor %s, Buttons %s, Icons %s"):format(
 		ns.Detect and "ok" or "MISSING", ns.Consume and "ok" or "MISSING",
+		ns.Vendor and "ok" or "MISSING",
 		ns.Buttons and "ok" or "MISSING", ns.Icons and "ok" or "MISSING"))
 	if ns.Buttons then
 		local food, water = ns.Buttons:Stocked()
