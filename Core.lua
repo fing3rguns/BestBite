@@ -241,9 +241,6 @@ function BestBite:Help()
 	frame:AddMessage("  /bb icons - repaint the action bar button with the item it would use")
 	frame:AddMessage("  /bb macroicon - also rewrite the macro's own icon, if this client allows it")
 	frame:AddMessage("  /bb reset - forget the items it has learned")
-	frame:AddMessage("  /bb debug - report what it sees")
-	frame:AddMessage("  /bb vendor - what restocking sees at the vendor that is open")
-	frame:AddMessage("  /bb notice - show the bubble a purchase raises, buying nothing")
 end
 
 -- Why the commands cannot do the job themselves, and the macro that can, said once
@@ -408,9 +405,23 @@ function BestBite.Consume()
 	return BestBite:Advise("consume")
 end
 
+-- Commands for working on the addon rather than for playing it: hidden from the help, the
+-- window and the readme unless this character has been switched into dev mode with
+-- `/bb dev`. Everything a player needs works without it.
+function BestBite:Dev()
+	return type(BestBiteDB) == "table" and BestBiteDB.dev == true
+end
+
 local function RunCommand(message)
 	local command = tostring(message or ""):match("^%s*(.-)%s*$"):lower()
-	if command == "food" or command == "eat" then
+	if command == "dev" then
+		BestBiteDB = BestBite:Db()
+		BestBiteDB.dev = not (BestBiteDB.dev == true)
+		BestBite:Print("dev commands: " .. (BestBiteDB.dev and "on" or "off"))
+		if ns.Window and ns.Window.buttons and ns.Window.buttons.debug then
+			if BestBiteDB.dev then ns.Window.buttons.debug:Show() else ns.Window.buttons.debug:Hide() end
+		end
+	elseif command == "food" or command == "eat" then
 		BestBite:Advise("food")
 	elseif command == "water" or command == "drink" then
 		BestBite:Advise("water")
@@ -438,9 +449,11 @@ local function RunCommand(message)
 		BestBite:Print("Rewriting the macro's own icon: " .. (db.writeMacroIcons and "on" or "off"))
 		if db.writeMacroIcons and ns.Icons then ns.Icons:Request(0) end
 	elseif command == "vendor" then
+		if not BestBite:Dev() then return end
 		local lines = ns.Vendor and ns.Vendor:Lines() or { "Vendor.lua did not load" }
 		for _, line in ipairs(lines) do BestBite:Print("vendor: " .. line) end
 	elseif command == "notice" then
+		if not BestBite:Dev() then return end
 		-- Shows the bubble a purchase would raise, with made-up numbers and nothing restocked,
 		-- so its look can be seen without waiting for a vendor and spending real money.
 		local vendor = ns.Vendor
@@ -452,6 +465,7 @@ local function RunCommand(message)
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Homemade Cherry Pie", vendor.Coins(36)))
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
 	elseif command == "debug" then
+		if not BestBite:Dev() then return end
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else
 		if not (ns.Window and ns.Window:Toggle()) then BestBite:Help() end

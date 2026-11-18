@@ -58,16 +58,12 @@ Off until you switch it on, in the window. With it on, opening a vendor that sel
 | `/bb icons` | Action bar buttons show the item they will use. On by default. |
 | `/bb macroicon` | Also rewrite the macro's own icon, if this client allows it. Off by default. |
 | `/bb reset` | Forget what it has learned about items. |
-| `/bb debug` | Opens the window on its debug page: what it sees, and every food or drink in the bags. |
-| `/bb vendor` | What restocking sees at the vendor that is open: what you carry, what it would buy, and what the vendor sells. |
 
 `/bestbite` is a long form of `/bb`.
 
 ## If a macro does nothing
 
 The button is holding no item, so there is nothing to use: no food or water you can use at your level in the bags, a potion rather than food, or an empty bag. Such a button stays where it is and greys out, and hovering it says what it is out of.
-
-`/bb debug`, or the Debug button in the window, names what each button holds and lists every food or drink it found, with what it read from each tooltip.
 
 ## Tests
 
@@ -82,6 +78,6 @@ python Tests\run.py
 
 - Everything it prints goes to your own chat frame; nothing is sent to other players, and it never announces which item it used.
 - Button positions, the two icon settings, the restock setting and what it has learned are saved for the account in `BestBiteDB`.
-- It knows the food buff by its aura, "Well Fed"; the window's debug page prints your auras if a client ever names it differently.
+- It knows the food buff by its aura, "Well Fed"; if a client ever names it differently, that name is what has to change.
 - Chat messages are English only. Item tooltips are matched in English and a few other languages.
 - `Logo.png` is the logo shown above. `Portrait.png` is that art on a dark disc, which is what the window wears as its portrait, and `Icon.png` is the 128 by 128 image the game shows in its addon list.

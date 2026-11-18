@@ -480,7 +480,8 @@ local function Reset()
 	MACROS, MACTION, MACTION_TEXTURE = {}, {}, {}
 	PLAYER = { level = 60, health = 500, healthMax = 1000, mana = 500, manaMax = 1000 }
 	COMBAT = false
-	BestBiteDB, ns.db = nil, nil
+	-- The harness works on the addon, so the dev commands are on unless a check says otherwise.
+	BestBiteDB, ns.db = { dev = true }, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
 	ns.Vendor.fallbackDone = {}
 	wipe(ns.Vendor.pending)
@@ -973,7 +974,7 @@ ns.Window.buttons.reset.scripts.OnClick()
 Check("window: reset forgets what it learned", next(ns.db.learned) == nil)
 
 -- Buying is where learning belongs: the purchase path still remembers what it bought.
-BestBiteDB = { vendor = { on = false, target = 5 } }
+BestBiteDB = { dev = true, vendor = { on = false, target = 5 } }
 ns.db = nil
 BAGS = {}
 ns.Vendor:Restock(true)
@@ -1479,7 +1480,7 @@ Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)
 ns.db = nil
-BestBiteDB = { vendor = { on = true, target = 10 } }
+BestBiteDB = { dev = true, vendor = { on = true, target = 10 } }
 slash("vendor")
 Check("vendor: /bb vendor says the setting and the keep", Said("restock on, keep 10, level 60"),
 	table.concat(MESSAGES, " / "))
@@ -1613,7 +1614,7 @@ Check("vendor: no bare c suffix is left", not ns.Vendor.Coins(450):find("c$"), n
 -- vendor and without spending anything.
 Reset()
 ns.db = nil
-BestBiteDB = { vendor = { on = true, target = 5 } }
+BestBiteDB = { dev = true, vendor = { on = true, target = 5 } }
 slash("notice")
 Check("vendor: /bb notice raises the bubble", Noticed("5 Homemade Cherry Pie"), NoticeText())
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
@@ -1633,6 +1634,37 @@ Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money ==
 Check("vendor: and the bubble is sized to hold its lines",
 	(_G.BestBiteNotice.width or 0) > 300 and (_G.BestBiteNotice.height or 0) > 56,
 	tostring(_G.BestBiteNotice.width) .. "x" .. tostring(_G.BestBiteNotice.height))
+
+-- The diagnostic commands are for working on the addon, not for playing it: with dev mode
+-- off a player cannot reach one, and the window does not offer the button.
+Reset()
+BestBiteDB = {}
+ns.db = nil
+MESSAGES = {}
+ns.Window:ShowPage("main")
+slash("notice")
+Check("dev: /bb notice does nothing for a player", #MESSAGES == 0 and not Noticed("Cherry Pie"),
+	NoticeText())
+slash("vendor")
+Check("dev: /bb vendor does nothing for a player", #MESSAGES == 0, table.concat(MESSAGES, " / "))
+slash("debug")
+Check("dev: /bb debug does nothing for a player", #MESSAGES == 0 and ns.Window.page ~= "debug",
+	tostring(ns.Window.page))
+ns.Window.buttons.debug.scripts.OnClick()
+Check("dev: and the button does nothing either", ns.Window.page ~= "debug", tostring(ns.Window.page))
+slash("dev")
+Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev commands: on"),
+	table.concat(MESSAGES, " / "))
+Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
+	tostring(ns.Window.buttons.debug.shown))
+slash("dev")
+Check("dev: and off again", BestBite:Dev() == false, tostring(BestBiteDB.dev))
+Check("dev: which takes the button away", ns.Window.buttons.debug.shown == false,
+	tostring(ns.Window.buttons.debug.shown))
+MESSAGES = {}
+ns.BestBite:Help()
+Check("dev: and the help does not name them", not Said("debug") and not Said("vendor")
+	and not Said("notice"), table.concat(MESSAGES, " / "))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

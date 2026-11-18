@@ -258,6 +258,9 @@ local function Build(self)
 	buttons.reset:SetPoint("LEFT", buttons.move, "RIGHT", 10, 0)
 	buttons.debug = Command("debug", "Debug", 120)
 	buttons.debug:SetPoint("LEFT", buttons.reset, "RIGHT", 10, 0)
+	-- Only for working on the addon: a player never needs the report, so the button is not
+	-- there unless dev mode has been switched on.
+	if not BestBite:Dev() then buttons.debug:Hide() end
 	self.buttons = buttons
 
 	-- The debug report is long, so it lives on its own page in a scroll frame rather than
@@ -453,6 +456,7 @@ end
 -- implementation of each.
 function Window:Run(command)
 	if command == "debug" then
+		if not BestBite:Dev() then return end
 		self:ShowDebug()
 		return
 	end
