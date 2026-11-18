@@ -92,7 +92,7 @@ Vendor.Coins = Coins
 -- What a visit did is said above the character's head rather than in chat, where a busy
 -- channel swallows it. Two lines at most, one per kind, and it goes away on its own.
 local NOTICE_LIFE = 5
-local NOTICE_PAD = 20      -- room inside the bubble's art, on every side
+local NOTICE_PAD = 16      -- room inside the bubble, between the text and its edge
 local NOTICE_GAP = 2       -- between the two lines
 local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
 local notice, noticeLines, noticeUntil = nil, {}, 0
@@ -122,27 +122,28 @@ local function BuildNotice()
 	frame:SetSize(360, 76)
 	frame:SetFrameStrata("HIGH")
 	frame:SetFrameLevel(50)
-	-- The client's own speech-bubble art, the one it draws over a character that talks, so
-	-- this reads as a bubble over yours rather than as another window. It is drawn here and
-	-- never sent anywhere: no other player sees it.
+	-- A dark panel with the client's tooltip border, so the line stays readable over whatever
+	-- is behind it. Drawn here and never sent anywhere: no other player sees it.
 	if frame.SetBackdrop then
 		pcall(frame.SetBackdrop, frame, {
-			bgFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
-			edgeFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
-			tile = false, tileSize = 0, edgeSize = 16,
-			insets = { left = NOTICE_PAD, right = NOTICE_PAD, top = NOTICE_PAD, bottom = NOTICE_PAD },
+			bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true, tileSize = 16, edgeSize = 16,
+			insets = { left = 5, right = 5, top = 5, bottom = 5 },
 		})
+		if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0.8) end
+		if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(1, 0.82, 0, 0.9) end
 	else
-		-- A client without backdrop support still gets the bubble, stretched to the frame.
-		local art = frame:CreateTexture(nil, "BACKGROUND")
-		art:SetPoint("TOPLEFT", frame, "TOPLEFT", -10, 10)
-		art:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 10, -10)
-		art:SetTexture("Interface\\Tooltips\\ChatBubble-Backdrop")
+		-- A client without backdrop support still gets a readable ground under the text.
+		local ground = frame:CreateTexture(nil, "BACKGROUND")
+		ground:SetAllPoints(frame)
+		ground:SetTexture(0, 0, 0, 0.8)
 	end
 	frame.lines = {}
 	for index = 1, 2 do
 		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		line:SetJustifyH("CENTER")
+		line:SetTextColor(1, 1, 1)
 		line:SetText("")
 		if index == 1 then
 			line:SetPoint("TOP", frame, "TOP", 0, -NOTICE_PAD)
