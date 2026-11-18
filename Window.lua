@@ -13,7 +13,7 @@ local Window = { page = "main" }
 ns.Window = Window
 
 local LOGO = "Interface\\AddOns\\BestBite\\Portrait.png"
-local WIDTH, HEIGHT = 430, 400
+local WIDTH, HEIGHT = 430, 430
 local CONTENT = WIDTH - 40
 local GREY = 0.75
 
@@ -83,7 +83,7 @@ end
 -- A setting, drawn as a switch: a ticked box with its name and the whole row clickable.
 -- The tick is set from the saved setting whenever the window is shown, so a command typed
 -- in chat and a click here cannot disagree.
-local function Switch(parent, text, command)
+local function Switch(parent, text, press)
 	local check = CreateFrame("Button", nil, parent)
 	check:SetSize(180, 22)
 
@@ -105,7 +105,7 @@ local function Switch(parent, text, command)
 	label:SetText(text)
 	check.label = label
 
-	check:SetScript("OnClick", function() Window:Run(command) end)
+	check:SetScript("OnClick", function() press() end)
 
 	function check:SetState(on)
 		self.on = on and true or false
@@ -174,15 +174,8 @@ local function Build(self)
 	local hint = Quiet(Label(main, "Both at once: put the two lines in one macro.", "GameFontHighlightSmall"))
 	hint:SetPoint("TOPLEFT", waterLabel, "BOTTOMLEFT", 0, -16)
 
-	-- The two settings are switches, so their state is visible at a glance; the rest are
+	-- The settings are switches, so their state is visible at a glance; the rest are
 	-- buttons that do one thing and are done.
-	local switches = {}
-	switches.icons = Switch(main, "Action bar icons", "icons")
-	switches.icons:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -18)
-	switches.macroicon = Switch(main, "Macro icons", "macroicon")
-	switches.macroicon:SetPoint("TOPLEFT", switches.icons, "TOPLEFT", 190, 0)
-	self.switches = switches
-
 	local buttons = {}
 	local function Command(name, text, width)
 		local button = CreateFrame("Button", nil, main, "UIPanelButtonTemplate")
@@ -193,8 +186,60 @@ local function Build(self)
 		return button
 	end
 
+	local switches = {}
+	switches.icons = Switch(main, "Action bar icons", function() Window:Run("icons") end)
+	switches.icons:SetPoint("TOPLEFT", hint, "BOTTOMLEFT", 0, -18)
+	switches.macroicon = Switch(main, "Macro icons", function() Window:Run("macroicon") end)
+	switches.macroicon:SetPoint("TOPLEFT", switches.icons, "TOPLEFT", 190, 0)
+	self.switches = switches
+
+	-- Restocking at vendors: a switch, how much of each to keep, and one press that buys
+	-- now rather than waiting for a merchant to be opened.
+	switches.vendor = Switch(main, "Restock from vendors", function()
+		local vendor = ns.Vendor
+		if not vendor then return end
+		local db = vendor:Db()
+		db.on = not db.on
+		Window:Refresh()
+	end)
+	switches.vendor:SetPoint("TOPLEFT", switches.icons, "BOTTOMLEFT", 0, -16)
+
+	local target = Quiet(Label(main, "Keep", "GameFontHighlightSmall"))
+	target:SetWidth(34)
+	target:SetPoint("TOPLEFT", switches.vendor, "BOTTOMLEFT", 0, -10)
+	self.targetLabel = Label(main, "5 of each", "GameFontHighlight")
+	self.targetLabel:SetWidth(120)
+	self.targetLabel:SetPoint("LEFT", target, "RIGHT", 6, 0)
+
+	local function StepTarget(delta)
+		return function()
+			local vendor = ns.Vendor
+			if not vendor then return end
+			local db = vendor:Db()
+			local nextTarget = (db.target or vendor.TARGET_MIN) + delta
+			db.target = math.max(vendor.TARGET_MIN, math.min(vendor.TARGET_MAX, nextTarget))
+			Window:Refresh()
+		end
+	end
+	buttons.vendorLess = Command("vendorLess", "minus", 26)
+	buttons.vendorLess:SetPoint("LEFT", self.targetLabel, "RIGHT", 6, 0)
+	buttons.vendorLess:SetScript("OnClick", function() StepTarget(-(ns.Vendor and ns.Vendor.TARGET_STEP or 5))() end)
+	buttons.vendorMore = Command("vendorMore", "plus", 26)
+	buttons.vendorMore:SetPoint("LEFT", buttons.vendorLess, "RIGHT", 4, 0)
+	buttons.vendorMore:SetScript("OnClick", function() StepTarget(ns.Vendor and ns.Vendor.TARGET_STEP or 5)() end)
+
+	self.vendorStatus = Quiet(Label(main, "", "GameFontHighlightSmall"))
+	self.vendorStatus:SetPoint("TOPLEFT", switches.vendor, "BOTTOMLEFT", 0, -34)
+
+	buttons.vendorBuy = Command("vendorBuy", "Buy now", 100)
+	buttons.vendorBuy:SetPoint("LEFT", buttons.vendorMore, "RIGHT", 10, 0)
+	buttons.vendorBuy:SetScript("OnClick", function()
+		if ns.Vendor then ns.Vendor:Restock(true) end
+		Window:Refresh()
+	end)
+
 	buttons.move = Command("move", "Move buttons")
-	buttons.move:SetPoint("TOPLEFT", switches.icons, "BOTTOMLEFT", 0, -16)
+	buttons.move:SetPoint("TOPLEFT", self.vendorStatus, "BOTTOMLEFT", 0, -10)
 	buttons.reset = Command("reset", "Reset learned", 130)
 	buttons.reset:SetPoint("LEFT", buttons.move, "RIGHT", 10, 0)
 	buttons.debug = Command("debug", "Debug", 120)
@@ -349,6 +394,38 @@ function Window:Refresh()
 	if not self.switches then return end
 	if self.switches.icons then self.switches.icons:SetState(db.showIcons ~= false) end
 	if self.switches.macroicon then self.switches.macroicon:SetState(db.writeMacroIcons == true) end
+
+	if self.switches.vendor and ns.Vendor then
+		local vendor = ns.Vendor
+		local settings = vendor:Db()
+		self.switches.vendor:SetState(settings.on == true)
+		self.targetLabel:SetText(("%d of each"):format(settings.target or vendor.TARGET_MIN))
+
+		local open = GetMerchantNumItems and GetMerchantNumItems() > 0
+		if self.buttons and self.buttons.vendorBuy then
+			if open then self.buttons.vendorBuy:Enable() else self.buttons.vendorBuy:Disable() end
+		end
+
+		if self.vendorStatus then
+			local stood, why = vendor:StandDown()
+			local text
+			if stood then
+				text = why .. ", so BestBite stands down."
+			elseif open then
+				local target = settings.target or vendor.TARGET_MIN
+				-- An unknown level counts nothing, rather than counting at level 0.
+				local level = UnitLevel("player") or 0
+				local food, water = 0, 0
+				if level > 0 then
+					food, water = vendor:Count("food", level, true), vendor:Count("water", level, true)
+				end
+				text = ("Food %d/%d, water %d/%d"):format(food, target, water, target)
+			else
+				text = "No merchant open"
+			end
+			self.vendorStatus:SetText(text)
+		end
+	end
 end
 
 -- The window's buttons run the same commands the slash line does, so there is one

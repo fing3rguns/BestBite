@@ -165,8 +165,9 @@ end
 
 -- kind, amount, buffs for the item, from its tooltip; else from what an earlier use
 -- learned of it (BestBiteDB.learned, for an item whose tooltip no longer parses);
--- else nil, nil.
-function Detect:Describe(bag, slot, itemID)
+-- else nil, nil. `noLearn` reads without writing: a display that counts the bags must
+-- not change the saved variables, or a reset would be undone by the redraw.
+function Detect:Describe(bag, slot, itemID, noLearn)
 	local kind, amount, buffs = self:Scan(bag, slot)
 	local db = BestBite:Db()
 	local learned = db.learned[itemID]
@@ -175,8 +176,8 @@ function Detect:Describe(bag, slot, itemID)
 		amount = amount or (learned and learned.amount)
 		buffs = buffs or (learned and learned.buffs)
 		if amount then
-			if not learned or learned.kind ~= kind or learned.amount ~= amount
-				or self:Points(learned.buffs) ~= self:Points(buffs) then
+			if not noLearn and (not learned or learned.kind ~= kind or learned.amount ~= amount
+				or self:Points(learned.buffs) ~= self:Points(buffs)) then
 				db.learned[itemID] = { kind = kind, amount = amount, buffs = buffs }
 			end
 			return kind, amount, buffs

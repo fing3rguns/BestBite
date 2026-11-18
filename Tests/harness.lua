@@ -259,6 +259,8 @@ local function InterfaceFrame(name)
 	function frame:IsShown() return self.shown end
 	function frame:CreateTexture() return Region(self) end
 	function frame:CreateFontString() return Region(self) end
+	function frame:Enable() self.disabled = false end
+	function frame:Disable() self.disabled = true end
 	function frame:SetScrollChild(child) self.scrollChild = child end
 	setmetatable(frame, { __index = function() return function() end end })
 	if name then _G[name] = frame end
@@ -811,6 +813,40 @@ Check("window: the macro icon switch turns that setting on", ns.db.writeMacroIco
 ns.Window.switches.macroicon.scripts.OnClick()
 Check("window: and off again", ns.db.writeMacroIcons == false and ns.Window.switches.macroicon.on == false)
 
+-- The vendor switch, the target and Buy now live in the window.
+slash("")
+ns.Window.switches.vendor.scripts.OnClick()
+Check("window: the vendor switch turns restocking on", ns.Vendor:Db().on == true)
+Check("window: and the switch shows it on", ns.Window.switches.vendor.on == true)
+ns.Window.switches.vendor.scripts.OnClick()
+Check("window: the vendor switch turns it off again", ns.Vendor:Db().on == false)
+
+ns.Window.buttons.vendorMore.scripts.OnClick()
+Check("window: plus raises the target", ns.Vendor:Db().target == 10, tostring(ns.Vendor:Db().target))
+ns.Window.buttons.vendorLess.scripts.OnClick()
+Check("window: minus lowers it", ns.Vendor:Db().target == 5, tostring(ns.Vendor:Db().target))
+ns.Window.buttons.vendorLess.scripts.OnClick()
+Check("window: and stops at one stack", ns.Vendor:Db().target == 5, tostring(ns.Vendor:Db().target))
+Check("window: the target label says what it will keep",
+	(ns.Window.targetLabel:GetText() or ""):find("5", 1, true) ~= nil, ns.Window.targetLabel:GetText())
+
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = false, target = 5 } }
+ns.Window.buttons.vendorBuy.scripts.OnClick()
+Check("window: Buy now buys with the switch off", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+
+-- The status line counts the bags, and a count is a read: at a merchant the window
+-- refreshes after every command, so learning there would undo a reset as it ran.
+ns.db = nil
+BestBiteDB = { vendor = { on = false, target = 5 }, learned = { [117] = { kind = "food", amount = 61 } } }
+ns.Window:Refresh()
+Check("window: refreshing at a merchant learns nothing", BestBiteDB.learned[9999] == nil,
+	tostring(BestBiteDB.learned[9999] and BestBiteDB.learned[9999].kind))
+Check("window: and forgets nothing either", BestBiteDB.learned[117] ~= nil)
+
 -- A setting changed in chat shows in the window next time it is opened.
 ns.Window.frame:Hide()
 ns.db.showIcons = false
@@ -827,6 +863,15 @@ Check("window: and off again", ns.Buttons.moving == false)
 ns.db.learned[422] = { kind = "food", amount = 61 }
 ns.Window.buttons.reset.scripts.OnClick()
 Check("window: reset forgets what it learned", next(ns.db.learned) == nil)
+
+-- Buying is where learning belongs: the purchase path still remembers what it bought.
+BestBiteDB = { vendor = { on = false, target = 5 } }
+ns.db = nil
+BAGS = {}
+ns.Vendor:Restock(true)
+Check("window: Buy now at the merchant still learns what it bought",
+	BestBiteDB.learned[9999] ~= nil and BestBiteDB.learned[9999].kind == "food",
+	tostring(BestBiteDB.learned[9999] and BestBiteDB.learned[9999].kind))
 
 ns.Window.buttons.debug.scripts.OnClick()
 Check("window: the debug button shows the debug page", ns.Window.page == "debug")

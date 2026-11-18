@@ -62,15 +62,16 @@ function Vendor:LevelAppropriate(itemID, level)
 	return true
 end
 
--- How much of a kind the bags hold that is worth counting.
-function Vendor:Count(kind, level)
+-- How much of a kind the bags hold that is worth counting. `noLearn` counts without
+-- remembering the items it read, for the window's display, which must have no side effects.
+function Vendor:Count(kind, level, noLearn)
 	local total = 0
 	for bag = 0, API.NumBags() do
 		for slot = 1, API.NumSlots(bag) do
 			local item = API.SlotItem(bag, slot)
 			if item and not item.locked and item.count > 0 and API.IsFoodDrink(item.itemID)
 				and self:LevelAppropriate(item.itemID, level) then
-				if Detect:Describe(bag, slot, item.itemID) == kind then
+				if Detect:Describe(bag, slot, item.itemID, noLearn) == kind then
 					total = total + item.count
 				end
 			end
