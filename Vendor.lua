@@ -95,7 +95,10 @@ local NOTICE_LIFE = 5
 local notice, noticeLines, noticeUntil = nil, {}, 0
 
 local function BuildNotice()
-	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent)
+	-- This client needs the backdrop mixin on a frame before it will draw one, which is the
+	-- same guard Polestar uses; without it SetBackdrop is there but paints nothing.
+	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent,
+		BackdropTemplateMixin and "BackdropTemplate" or nil)
 	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 132)
 	frame:SetSize(400, 52)
 	frame:SetFrameStrata("HIGH")
@@ -110,6 +113,12 @@ local function BuildNotice()
 			tile = false, tileSize = 0, edgeSize = 12,
 			insets = { left = 12, right = 12, top = 10, bottom = 12 },
 		})
+	else
+		-- A client without backdrop support still gets the bubble, stretched to the frame.
+		local art = frame:CreateTexture(nil, "BACKGROUND")
+		art:SetPoint("TOPLEFT", frame, "TOPLEFT", -10, 10)
+		art:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 10, -10)
+		art:SetTexture("Interface\\Tooltips\\ChatBubble-Backdrop")
 	end
 	frame.lines = {}
 	for index = 1, 2 do
