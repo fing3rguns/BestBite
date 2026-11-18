@@ -187,6 +187,9 @@ function BestBite:Db()
 	if type(BestBiteDB.learned) ~= "table" then BestBiteDB.learned = {} end
 	if BestBiteDB.showIcons == nil then BestBiteDB.showIcons = true end
 	if BestBiteDB.writeMacroIcons == nil then BestBiteDB.writeMacroIcons = false end
+	if type(BestBiteDB.vendor) ~= "table" then BestBiteDB.vendor = {} end
+	if BestBiteDB.vendor.on == nil then BestBiteDB.vendor.on = false end
+	if type(BestBiteDB.vendor.target) ~= "number" then BestBiteDB.vendor.target = 5 end
 	ns.db = BestBiteDB
 	return ns.db
 end

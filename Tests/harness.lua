@@ -364,6 +364,7 @@ LoadAddon("Core.lua")
 LoadAddon("Detect.lua")
 LoadAddon("Buffs.lua")
 LoadAddon("Consume.lua")
+LoadAddon("Vendor.lua")
 LoadAddon("Buttons.lua")
 LoadAddon("Icons.lua")
 LoadAddon("Window.lua")
@@ -968,6 +969,40 @@ Check("vendor: and plain food first when the buff is banked", ns.Consume:Better(
 Check("vendor: more restore wins on equal points",
 	ns.Consume:Better({ amount = 500, points = 0, itemLevel = 1, count = 1 },
 		{ amount = 100, points = 0, itemLevel = 60, count = 9 }, false) == true)
+
+-- Nothing is restocked while Polestar says it is doing it.
+Reset()
+local standDown, why = ns.Vendor:StandDown()
+Check("vendor: nothing stands down without Polestar", standDown == false, tostring(why))
+
+Polestar = { QoL = { Restock = { Get = function(kind) return kind == "food" and 20 or 0 end } } }
+local standDown2, why2 = ns.Vendor:StandDown()
+Check("vendor: Polestar with food amounts stands BestBite down", standDown2 == true, tostring(why2))
+Check("vendor: and says which addon is doing it", tostring(why2):find("Polestar", 1, true) ~= nil, tostring(why2))
+Polestar = nil
+
+-- Only items good for your level count towards the target: at level 40, the band starts
+-- at 30, so a level 35 food counts, a level 15 one is too weak and a level 60 one unusable.
+Reset()
+PLAYER.level = 40
+Check("vendor: a level 15 food is too weak to count", ns.Vendor:LevelAppropriate(422, 40) == false)
+Check("vendor: a level 60 food is not usable yet", ns.Vendor:LevelAppropriate(9999, 40) == false)
+Check("vendor: a level 35 food counts", ns.Vendor:LevelAppropriate(9997, 40) == true)
+Check("vendor: an item with no level requirement counts", ns.Vendor:LevelAppropriate(5350, 40) == true)
+
+-- Twenty weak items do not satisfy the target.
+Reset()
+PLAYER.level = 60
+Put(0, 1, 422, 20)
+Put(0, 2, 9999, 2)
+local shortfall, have = ns.Vendor:Shortfall("food")
+Check("vendor: weak food does not count towards the target", have == 2, tostring(have))
+Check("vendor: so the shortfall is measured against the good food", shortfall == 3, tostring(shortfall))
+
+-- The switch and the target come from the saved settings.
+Reset()
+Check("vendor: restocking is off by default", ns.Vendor:Db().on == false)
+Check("vendor: one stack is the default target", ns.Vendor:Db().target == 5, tostring(ns.Vendor:Db().target))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
