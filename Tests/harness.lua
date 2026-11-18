@@ -307,6 +307,7 @@ local function Region(parent)
 	region.SetText = function(self, text) self.text = tostring(text or "") end
 	region.GetText = function(self) return self.text end
 	region.GetParent = function(self) return self.parent end
+	region.GetStringWidth = function(self) return #(self.text or "") * 7 end
 	region.GetStringHeight = function() return 0 end
 	region.GetHeight = function(self) return self.height or 0 end
 	region.Show = function(self) self.shown = true end
@@ -1618,6 +1619,9 @@ Check("vendor: /bb notice raises the bubble", Noticed("bought 5 Homemade Cherry 
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
+Check("vendor: and the bubble is sized to hold its lines",
+	(_G.BestBiteNotice.width or 0) > 300 and (_G.BestBiteNotice.height or 0) > 56,
+	tostring(_G.BestBiteNotice.width) .. "x" .. tostring(_G.BestBiteNotice.height))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

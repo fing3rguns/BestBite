@@ -92,7 +92,26 @@ Vendor.Coins = Coins
 -- What a visit did is said above the character's head rather than in chat, where a busy
 -- channel swallows it. Two lines at most, one per kind, and it goes away on its own.
 local NOTICE_LIFE = 5
+local NOTICE_PAD = 20      -- room inside the bubble's art, on every side
+local NOTICE_GAP = 2       -- between the two lines
+local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
 local notice, noticeLines, noticeUntil = nil, {}, 0
+
+local function LineHeight(line)
+	if line.GetStringHeight then
+		local ok, height = pcall(line.GetStringHeight, line)
+		if ok and height and height > 0 then return height end
+	end
+	return 18
+end
+
+local function LineWidth(line)
+	if line.GetStringWidth then
+		local ok, width = pcall(line.GetStringWidth, line)
+		if ok and width then return width end
+	end
+	return 0
+end
 
 local function BuildNotice()
 	-- This client needs the backdrop mixin on a frame before it will draw one, which is the
@@ -100,7 +119,7 @@ local function BuildNotice()
 	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent,
 		BackdropTemplateMixin and "BackdropTemplate" or nil)
 	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 132)
-	frame:SetSize(400, 52)
+	frame:SetSize(360, 76)
 	frame:SetFrameStrata("HIGH")
 	frame:SetFrameLevel(50)
 	-- The client's own speech-bubble art, the one it draws over a character that talks, so
@@ -110,8 +129,8 @@ local function BuildNotice()
 		pcall(frame.SetBackdrop, frame, {
 			bgFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
 			edgeFile = "Interface\\Tooltips\\ChatBubble-Backdrop",
-			tile = false, tileSize = 0, edgeSize = 12,
-			insets = { left = 12, right = 12, top = 10, bottom = 12 },
+			tile = false, tileSize = 0, edgeSize = 16,
+			insets = { left = NOTICE_PAD, right = NOTICE_PAD, top = NOTICE_PAD, bottom = NOTICE_PAD },
 		})
 	else
 		-- A client without backdrop support still gets the bubble, stretched to the frame.
@@ -123,15 +142,40 @@ local function BuildNotice()
 	frame.lines = {}
 	for index = 1, 2 do
 		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-		line:SetPoint("CENTER", frame, "CENTER", 0, (2 - index) * 16 - 8)
 		line:SetJustifyH("CENTER")
 		line:SetText("")
+		if index == 1 then
+			line:SetPoint("TOP", frame, "TOP", 0, -NOTICE_PAD)
+		else
+			line:SetPoint("TOP", frame.lines[index - 1], "BOTTOM", 0, -NOTICE_GAP)
+		end
 		frame.lines[index] = line
 	end
 	frame:SetScript("OnUpdate", function(self)
 		if (GetTime() or 0) >= noticeUntil then self:Hide() end
 	end)
 	return frame
+end
+
+-- Sizes the bubble to the text it holds, so the lines sit inside the art rather than over
+-- its edges.
+local function FitNotice()
+	local shown, widest, tallest = {}, 0, 0
+	for _, line in ipairs(notice.lines) do
+		local text = line:GetText() or ""
+		if text ~= "" then
+			shown[#shown + 1] = line
+			widest = math.max(widest, LineWidth(line))
+		end
+	end
+	for _, line in ipairs(notice.lines) do
+		if LineWidth(line) > NOTICE_TEXT_MAX then line:SetWidth(NOTICE_TEXT_MAX) end
+	end
+	widest = math.min(widest, NOTICE_TEXT_MAX)
+	for _, line in ipairs(shown) do tallest = tallest + LineHeight(line) end
+	tallest = tallest + math.max(0, #shown - 1) * NOTICE_GAP
+
+	notice:SetSize(math.max(140, widest + NOTICE_PAD * 2 + 8), math.max(56, tallest + NOTICE_PAD * 2))
 end
 
 -- Adds one line to the notice. A purchase reports after the visit that made it, so the lines
@@ -145,8 +189,10 @@ function Vendor:Notice(text)
 
 	if not notice then notice = BuildNotice() end
 	for index, line in ipairs(notice.lines) do
+		line:SetWidth(0)
 		line:SetText(noticeLines[index] or "")
 	end
+	FitNotice()
 	noticeUntil = now + NOTICE_LIFE
 	notice:Show()
 end
