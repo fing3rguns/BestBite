@@ -115,6 +115,15 @@ GetMerchantItemMaxStack = function(index)
 	local entry = MERCHANT.stock[index]
 	return entry and entry.maxStack or 1
 end
+-- The client's fixed tuple: name, texture, price per purchase, stack, available.
+GetMerchantItemInfo = function(index)
+	local entry = MERCHANT.stock[index]
+	if not entry or MERCHANT.noTuple then return nil end
+	local available = entry.available
+	if MERCHANT.noAvailability then available = nil end
+	return ITEMS[entry.itemID] and ITEMS[entry.itemID].name or "item", "Interface\\Icons\\Item",
+		entry.price, entry.stack, available, true, true, false
+end
 -- The spell an item's use is filed under ("Food", "Drink"): the last resort for a client
 -- whose tooltips both come back empty.
 GetItemSpell = function(itemID)
@@ -125,8 +134,10 @@ C_MerchantFrame = {
 	GetItemInfo = function(index)
 		local entry = MERCHANT.stock[index]
 		if not entry then return nil end
+		local available = entry.available
+		if MERCHANT.noAvailability then available = nil end
 		return { itemID = entry.itemID, price = entry.price, stackCount = entry.stack,
-			numAvailable = entry.available, isPurchasable = true }
+			numAvailable = available, isPurchasable = true }
 	end,
 }
 GetMoney = function() return MERCHANT.money end
@@ -1501,6 +1512,29 @@ BestBiteDB = { vendor = { on = false, target = 20 } }
 local db = ns.Vendor:Db()
 Check("db: the saved table wins over one made before it arrived", db.on == false and db.target == 20,
 	("on=%s target=%s"):format(tostring(db.on), tostring(db.target)))
+
+-- A client that answers no availability at all must not look sold out: the item is taken as
+-- unlimited, which is what a vendor with an endless shelf is.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+MERCHANT.noAvailability = true
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: an availability the client does not answer reads as unlimited, not sold out",
+	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
+
+-- Without the fixed tuple, the client's own table is read instead.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+MERCHANT.noTuple = true
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: the client's own item table is read when the tuple is missing",
+	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

@@ -175,25 +175,31 @@ function Vendor:Shortfall(kind)
 	return math.max(0, target - have), have
 end
 
+-- A vendor's stock, as the client counts it: items, with -1 for unlimited. A client that
+-- answers no availability at all is taken as unlimited rather than sold out, so a field this
+-- client does not fill in cannot make every item look gone.
+local function Available(count)
+	return tonumber(count) or -1
+end
+
 -- itemID, price, stack size and how many items the vendor has, for one of its items. The
--- price is what one purchase of `stack` items costs, and a negative count is the client's
--- word for unlimited stock. The client answers either a table (C_MerchantFrame) or a list
--- (GetMerchantItemInfo); both are read.
+-- price is what one purchase of `stack` items costs. The tuple GetMerchantItemInfo is read
+-- first because its fields are fixed; C_MerchantFrame's table is a client's own shape and is
+-- read for the item id and as the fallback.
 function Vendor:Merchant(index)
+	local itemID = GetMerchantItemID and GetMerchantItemID(index)
+	if GetMerchantItemInfo then
+		local ok, _, _, price, stack, available = pcall(GetMerchantItemInfo, index)
+		if ok and (price ~= nil or stack ~= nil or available ~= nil) then
+			return itemID, tonumber(price) or 0, tonumber(stack) or 1, Available(available)
+		end
+	end
 	if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
 		local ok, info = pcall(C_MerchantFrame.GetItemInfo, index)
 		if ok and type(info) == "table" then
-			local itemID = info.itemID or (GetMerchantItemID and GetMerchantItemID(index))
 			local stack = info.stackCount or info.quantity or 1
-			return itemID, tonumber(info.price) or 0, tonumber(stack) or 1,
-				tonumber(info.numAvailable or info.totalAvailable) or 0
-		end
-	end
-	if GetMerchantItemInfo then
-		local ok, _, _, price, stack, available = pcall(GetMerchantItemInfo, index)
-		if ok then
-			return GetMerchantItemID and GetMerchantItemID(index), tonumber(price) or 0,
-				tonumber(stack) or 1, tonumber(available) or 0
+			return info.itemID or itemID, tonumber(info.price) or 0, tonumber(stack) or 1,
+				Available(info.numAvailable or info.totalAvailable)
 		end
 	end
 	return nil
@@ -216,7 +222,10 @@ function Vendor:Pick(kind)
 
 	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
 		local itemID, price, stack, available = self:Merchant(index)
-		if itemID and Sold(available) and API.IsFoodDrink(itemID) and API.IsUsable(itemID) then
+		-- Usability is not asked of a merchant item: the level band already decides whether
+		-- it is good for this character, and a client answering no to a lookup it does not
+		-- really support would empty the vendor.
+		if itemID and Sold(available) and API.IsFoodDrink(itemID) then
 			local itemKind, amount, buffs = Detect:ScanMerchant(index)
 			if itemKind == kind then
 				local _, itemLevel = API.ItemInfo(itemID)
@@ -442,6 +451,21 @@ function Vendor:Lines()
 				price or 0, stack or 1, available or 0,
 				self:LevelAppropriate(itemID, level) and "" or ", outside your band")
 		end
+	end
+
+	-- Why a kind came back with nothing to buy, counted the way the buy does it.
+	for _, kind in ipairs({ "food", "water" }) do
+		local readable, soldOut, unusable = 0, 0, 0
+		for index = 1, merchant do
+			local itemID, _, _, available = self:Merchant(index)
+			if itemID and Detect:ScanMerchant(index) == kind then
+				readable = readable + 1
+				if not Sold(available) then soldOut = soldOut + 1 end
+				if not API.IsUsable(itemID) then unusable = unusable + 1 end
+			end
+		end
+		lines[#lines + 1] = ("%s: %d readable, %d sold out, %d not usable by you"):format(
+			kind, readable, soldOut, unusable)
 	end
 	return lines
 end
