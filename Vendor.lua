@@ -516,7 +516,6 @@ function Vendor:Restock(explicit)
 						if left > 0 and reason then
 							record.notes[#record.notes + 1] = reason .. ", " .. left .. " short"
 						end
-						if fellBack then record.notes[#record.notes + 1] = "it was below your level" end
 					end
 					self:Settle(pick.itemID)
 				elseif reason then

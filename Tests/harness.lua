@@ -1265,7 +1265,7 @@ ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: a fallback is bought when nothing is in band", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and it says it was a fallback", Noticed("below your level"), NoticeText())
+Check("vendor: and the bubble says nothing about the level", not Noticed("below your level"), NoticeText())
 
 -- A weak item never outranks one of the band on the same vendor.
 Reset()
@@ -1587,7 +1587,7 @@ local boughtKinds = {}
 for _, buy in ipairs(MERCHANT.bought) do boughtKinds[buy.itemID] = true end
 Check("vendor: food and water below the band are both bought", boughtKinds[2003] and boughtKinds[159],
 	table.concat(MESSAGES, " / "))
-Check("vendor: and both are said to be below the level", Noticed("below your level"),
+Check("vendor: and neither line mentions the level", not Noticed("below your level"),
 	table.concat(MESSAGES, " / "))
 
 -- An item needing a higher level is not a fallback: it cannot be used at all.
