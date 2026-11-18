@@ -128,6 +128,25 @@ local function ReadGoods()
 	return kind, amount, buffs
 end
 
+-- What using the item does, by the name of the spell the client files its use under: a
+-- client whose merchant tooltip leaves the "Use:" line out still answers this, and "Food"
+-- and "Drink" are the words it uses.
+local DRINK_WORDS = Words("drink", "water", "boire", "beber", "bebida", "trinken")
+local FOOD_WORDS = Words("food", "eat", "essen", "manger", "comer", "comida")
+
+local function SpellKind(itemID)
+	if not itemID or type(GetItemSpell) ~= "function" then return nil end
+	local ok, name = pcall(GetItemSpell, itemID)
+	if not ok or type(name) ~= "string" then
+		ok, name = pcall(GetItemSpell, "item:" .. tostring(itemID))
+		if not ok or type(name) ~= "string" then return nil end
+	end
+	local spell = name:lower()
+	if SaysWord(spell, DRINK_WORDS) then return "water" end
+	if SaysWord(spell, FOOD_WORDS) then return "food" end
+	return nil
+end
+
 -- kind, amount and any Well Fed points for the item in the slot.
 function Detect:Scan(bag, slot)
 	BestBite:Step("scanning an item tooltip")
@@ -140,18 +159,56 @@ function Detect:Scan(bag, slot)
 end
 
 -- The same for the item a merchant is selling, which only the tooltip can tell us about.
+-- The merchant's own tooltip is tried first; a client whose merchant tooltip leaves the
+-- "Use:" line out is read through the item's hyperlink instead, and one that answers
+-- neither is classified by the spell the client files the item's use under.
 function Detect:ScanMerchant(index)
 	BestBite:Step("scanning a merchant item tooltip")
+	local kind, amount, buffs
+
+	if tooltip.SetMerchantItem then
+		tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+		tooltip:ClearLines()
+		tooltip:SetMerchantItem(index)
+		kind, amount, buffs = ReadGoods()
+		tooltip:ClearLines()
+	end
+
+	if not kind and tooltip.SetHyperlink and GetMerchantItemLink then
+		local link = GetMerchantItemLink(index)
+		if link then
+			tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+			tooltip:ClearLines()
+			tooltip:SetHyperlink(link)
+			kind, amount, buffs = ReadGoods()
+			tooltip:ClearLines()
+		end
+	end
+
+	if not kind then
+		kind = SpellKind(GetMerchantItemID and GetMerchantItemID(index))
+	end
+	return kind, amount, buffs
+end
+
+-- What the tooltip of a merchant item actually held, for `/bb vendor`. A kind that comes
+-- back unread is otherwise impossible to tell from a merchant that sells no food.
+function Detect:RawMerchant(index)
+	local lines = {}
+	local function Collect()
+		for _, region in ipairs({ tooltip:GetRegions() }) do
+			if region.GetObjectType and region:GetObjectType() == "FontString" then
+				local text = region:GetText()
+				if text then lines[#lines + 1] = StripColors(text) end
+			end
+		end
+	end
 	tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
 	tooltip:ClearLines()
-	if tooltip.SetMerchantItem then
-		tooltip:SetMerchantItem(index)
-	elseif tooltip.SetHyperlink and GetMerchantItemLink and GetMerchantItemLink(index) then
-		tooltip:SetHyperlink(GetMerchantItemLink(index))
-	end
-	local kind, amount, buffs = ReadGoods()
+	if tooltip.SetMerchantItem then tooltip:SetMerchantItem(index) end
+	Collect()
 	tooltip:ClearLines()
-	return kind, amount, buffs
+	return lines
 end
 
 -- The total stat points a buff set grants: 0 for none.

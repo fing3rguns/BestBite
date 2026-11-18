@@ -58,6 +58,7 @@ Off until you switch it on, in the window. With it on, opening a vendor that sel
 | `/bb macroicon` | Also rewrite the macro's own icon, if this client allows it. Off by default. |
 | `/bb reset` | Forget what it has learned about items. |
 | `/bb debug` | Opens the window on its debug page: what it sees, and every food or drink in the bags. |
+| `/bb vendor` | What restocking sees at the vendor that is open: what you carry, what it would buy, and what the vendor sells. |
 
 `/bestbite` is a long form of `/bb`.
 

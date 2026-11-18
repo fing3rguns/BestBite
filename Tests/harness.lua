@@ -115,6 +115,12 @@ GetMerchantItemMaxStack = function(index)
 	local entry = MERCHANT.stock[index]
 	return entry and entry.maxStack or 1
 end
+-- The spell an item's use is filed under ("Food", "Drink"): the last resort for a client
+-- whose tooltips both come back empty.
+GetItemSpell = function(itemID)
+	local id = tonumber(itemID) or tonumber(tostring(itemID):match("item:(%d+)"))
+	return MERCHANT.spells and MERCHANT.spells[id] or nil
+end
 C_MerchantFrame = {
 	GetItemInfo = function(index)
 		local entry = MERCHANT.stock[index]
@@ -245,9 +251,24 @@ local TOOLTIP = {
 		end
 	end,
 	SetMerchantItem = function(_, index)
+		-- `MERCHANT.bareTooltip` is this client's merchant tooltip: the name and the price,
+		-- no "Use:" line, which is why the link and the spell are there to be read.
+		if MERCHANT.bareTooltip then return end
 		local entry = MERCHANT and MERCHANT.stock and MERCHANT.stock[index]
 		if not entry then return end
 		for _, line in ipairs(ITEMS[entry.itemID].lines or {}) do
+			regions[#regions + 1] = {
+				GetObjectType = function() return "FontString" end,
+				GetText = function() return line end,
+			}
+		end
+	end,
+	SetHyperlink = function(_, link)
+		if MERCHANT.links == false then return end
+		local itemID = tonumber(tostring(link):match("item:(%d+)"))
+		local it = itemID and ITEMS[itemID]
+		if not it then return end
+		for _, line in ipairs(it.lines or {}) do
 			regions[#regions + 1] = {
 				GetObjectType = function() return "FontString" end,
 				GetText = function() return line end,
@@ -1443,6 +1464,43 @@ BestBiteDB = { vendor = { on = false, target = 5 } }
 ns.Vendor:Restock(true)
 Check("vendor: Buy now with no vendor open says so", Said("no vendor is open"),
 	table.concat(MESSAGES, " / "))
+
+-- This client's merchant tooltip carries the name and the price but no "Use:" line, which is
+-- what made every vendor item unreadable in game: the item's own link still has it.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+MERCHANT.bareTooltip = true
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a merchant tooltip without a Use line is read through the item's link",
+	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
+
+-- Neither tooltip says anything: the spell the item's use is filed under still tells food
+-- from drink, so the item is not passed over.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+MERCHANT.bareTooltip = true
+MERCHANT.links = false
+MERCHANT.spells = { [9999] = "Food" }
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: an item no tooltip explains is classified by the spell its use is filed under",
+	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
+
+-- The client can hand the saved table over after the addon has already asked for it: what is
+-- written has to follow the table that gets saved, not the one that was there first.
+Reset()
+ns.db = nil
+BestBiteDB = nil
+ns.Vendor:Db().on = true
+BestBiteDB = { vendor = { on = false, target = 20 } }
+local db = ns.Vendor:Db()
+Check("db: the saved table wins over one made before it arrived", db.on == false and db.target == 20,
+	("on=%s target=%s"):format(tostring(db.on), tostring(db.target)))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

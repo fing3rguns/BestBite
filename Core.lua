@@ -181,17 +181,21 @@ function API.Showable(value)
 end
 
 -- The saved variables, filled in on first use so the file needs no load event.
+-- The saved table is looked up on every call rather than remembered: this client can hand
+-- over BestBiteDB after the addon has already asked for it, and anything written through a
+-- table remembered from before that moment is lost at the next logout.
 function BestBite:Db()
-	if ns.db then return ns.db end
 	if type(BestBiteDB) ~= "table" then BestBiteDB = {} end
-	if type(BestBiteDB.learned) ~= "table" then BestBiteDB.learned = {} end
-	if BestBiteDB.showIcons == nil then BestBiteDB.showIcons = true end
-	if BestBiteDB.writeMacroIcons == nil then BestBiteDB.writeMacroIcons = false end
-	if type(BestBiteDB.vendor) ~= "table" then BestBiteDB.vendor = {} end
-	if BestBiteDB.vendor.on == nil then BestBiteDB.vendor.on = false end
-	if type(BestBiteDB.vendor.target) ~= "number" then BestBiteDB.vendor.target = 5 end
-	ns.db = BestBiteDB
-	return ns.db
+	if ns.db ~= BestBiteDB then
+		if type(BestBiteDB.learned) ~= "table" then BestBiteDB.learned = {} end
+		if BestBiteDB.showIcons == nil then BestBiteDB.showIcons = true end
+		if BestBiteDB.writeMacroIcons == nil then BestBiteDB.writeMacroIcons = false end
+		if type(BestBiteDB.vendor) ~= "table" then BestBiteDB.vendor = {} end
+		if BestBiteDB.vendor.on == nil then BestBiteDB.vendor.on = false end
+		if type(BestBiteDB.vendor.target) ~= "number" then BestBiteDB.vendor.target = 5 end
+		ns.db = BestBiteDB
+	end
+	return BestBiteDB
 end
 
 function BestBite:Print(message)
