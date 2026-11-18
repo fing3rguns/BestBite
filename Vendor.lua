@@ -220,7 +220,7 @@ function Vendor:Land(itemID)
 	if fresh > 0 then
 		local already = record.reported
 		record.reported = landed
-		local said = ("bought %d %s for %s"):format(fresh, record.name or "item",
+		local said = ("restocked %d %s for %s"):format(fresh, record.name or "item",
 			Coins(Cost(record, landed) - Cost(record, already)))
 		if #record.notes > 0 then said = said .. ": " .. table.concat(record.notes, ", ") end
 		self:Notice(said)
@@ -500,7 +500,7 @@ function Vendor:Restock(explicit)
 			-- nothing, and every visit would add another.
 			if pick and fellBack and not explicit and Consume:Find(kind) then
 				pick, fellBack = nil, false
-				said[#said + 1] = "your " .. kind .. " is below your level, so none was bought"
+				said[#said + 1] = "your " .. kind .. " is below your level, so none was restocked"
 			end
 			-- A fallback never counts towards the target, so a second pass of this visit would
 			-- buy the same weak item again: one such purchase per kind per visit is enough.

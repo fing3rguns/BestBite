@@ -1176,7 +1176,7 @@ Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 
 Check("vendor: water is bought up to the target", ns.Vendor:Count("water", 60) == 5,
 	tostring(ns.Vendor:Count("water", 60)))
 Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
-Check("vendor: and it said what it bought, above the character", Noticed("bought"), NoticeText())
+Check("vendor: and it said what it bought, above the character", Noticed("restocked"), NoticeText())
 
 -- Part of a target is topped up, not a whole one.
 Reset()
@@ -1339,7 +1339,7 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: a stack of five priced at 100 buys five items", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
-Check("vendor: and the report is the true cost", Noticed("bought 5 Raid Food for 1"),
+Check("vendor: and the report is the true cost", Noticed("restocked 5 Raid Food for 1"),
 	table.concat(MESSAGES, " / "))
 Check("vendor: which is what left the purse", MERCHANT.money == 99900, tostring(MERCHANT.money))
 
@@ -1353,7 +1353,7 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: money buys as many items as it covers", ns.Vendor:Count("food", 60) == 2,
 	tostring(ns.Vendor:Count("food", 60)))
-Check("vendor: and the cost of those two is reported", Noticed("bought 2 Raid Food for 40"),
+Check("vendor: and the cost of those two is reported", Noticed("restocked 2 Raid Food for 40"),
 	table.concat(MESSAGES, " / "))
 Check("vendor: and what the money could not cover", Noticed("3 short"), NoticeText())
 
@@ -1390,8 +1390,8 @@ Check("vendor: the visit buys the shortfall", #MERCHANT.bought == 1, tostring(#M
 Fire("MERCHANT_UPDATE")
 Check("vendor: a purchase not landed is not bought again", #MERCHANT.bought == 1,
 	tostring(#MERCHANT.bought))
-Check("vendor: and is not reported before it lands", not Noticed("bought"), NoticeText())
-Check("vendor: and nothing about the purchase goes to chat", not Said("bought"),
+Check("vendor: and is not reported before it lands", not Noticed("restocked"), NoticeText())
+Check("vendor: and nothing about the purchase goes to chat", not Said("restocked"),
 	table.concat(MESSAGES, " / "))
 Land()
 Fire("MERCHANT_UPDATE")
@@ -1400,7 +1400,7 @@ Check("vendor: and it is reported once", (function()
 	local bought = 0
 	for _, line in ipairs(_G.BestBiteNotice and _G.BestBiteNotice.lines or {}) do
 		local text = line:GetText() or ""
-		local _, count = text:gsub("bought", "bought")
+		local _, count = text:gsub("restocked", "restocked")
 		bought = bought + count
 	end
 	return bought == 1
@@ -1615,7 +1615,7 @@ Reset()
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 slash("notice")
-Check("vendor: /bb notice raises the bubble", Noticed("bought 5 Homemade Cherry Pie"), NoticeText())
+Check("vendor: /bb notice raises the bubble", Noticed("restocked 5 Homemade Cherry Pie"), NoticeText())
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))

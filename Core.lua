@@ -441,7 +441,7 @@ local function RunCommand(message)
 		local lines = ns.Vendor and ns.Vendor:Lines() or { "Vendor.lua did not load" }
 		for _, line in ipairs(lines) do BestBite:Print("vendor: " .. line) end
 	elseif command == "notice" then
-		-- Shows the bubble a purchase would raise, with made-up numbers and nothing bought,
+		-- Shows the bubble a purchase would raise, with made-up numbers and nothing restocked,
 		-- so its look can be seen without waiting for a vendor and spending real money.
 		local vendor = ns.Vendor
 		if not vendor then
@@ -449,9 +449,9 @@ local function RunCommand(message)
 			return
 		end
 		vendor:ClearNotice()
-		vendor:Notice(("bought %d %s for %s: it was below your level"):format(5,
+		vendor:Notice(("restocked %d %s for %s: it was below your level"):format(5,
 			"Homemade Cherry Pie", vendor.Coins(36)))
-		vendor:Notice(("bought %d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
+		vendor:Notice(("restocked %d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
 	elseif command == "debug" then
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else
