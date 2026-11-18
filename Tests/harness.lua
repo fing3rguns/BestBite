@@ -1617,6 +1617,17 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 slash("notice")
 Check("vendor: /bb notice raises the bubble", Noticed("5 Homemade Cherry Pie"), NoticeText())
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
+Check("vendor: and Restocked is said once, as a heading",
+	(function()
+		local count = 0
+		for _, line in ipairs(_G.BestBiteNotice.lines or {}) do
+			local _, found = (line:GetText() or ""):gsub("Restocked", "Restocked")
+			count = count + found
+		end
+		return count == 1
+	end)(), NoticeText())
+Check("vendor: and the heading comes first", (_G.BestBiteNotice.lines[1]:GetText() or "") == "Restocked",
+	_G.BestBiteNotice.lines[1]:GetText())
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
 Check("vendor: and the bubble is sized to hold its lines",

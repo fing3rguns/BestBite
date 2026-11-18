@@ -92,10 +92,11 @@ Vendor.Coins = Coins
 -- What a visit did is said above the character's head rather than in chat, where a busy
 -- channel swallows it. Two lines at most, one per kind, and it goes away on its own.
 local NOTICE_LIFE = 5
+local NOTICE_MAX = 3       -- a heading and the two kinds, at most
 local NOTICE_PAD = 16      -- room inside the bubble, between the text and its edge
 local NOTICE_GAP = 2       -- between the two lines
 local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
-local notice, noticeLines, noticeUntil = nil, {}, 0
+local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
 
 local function LineHeight(line)
 	if line.GetStringHeight then
@@ -140,7 +141,7 @@ local function BuildNotice()
 		ground:SetTexture(0, 0, 0, 0.8)
 	end
 	frame.lines = {}
-	for index = 1, 2 do
+	for index = 1, 3 do
 		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		line:SetJustifyH("CENTER")
 		line:SetTextColor(1, 1, 1)
@@ -179,28 +180,51 @@ local function FitNotice()
 	notice:SetSize(math.max(140, widest + NOTICE_PAD * 2 + 8), math.max(56, tallest + NOTICE_PAD * 2))
 end
 
--- Adds one line to the notice. A purchase reports after the visit that made it, so the lines
--- are kept while the notice is up rather than each one replacing the last.
-function Vendor:Notice(text)
-	if not text or text == "" then return end
+-- A notice line is dropped when the notice has been away long enough to be a new one.
+local function Reopen()
 	local now = GetTime and GetTime() or 0
-	if now >= noticeUntil then noticeLines = {} end
-	noticeLines[#noticeLines + 1] = text
-	while #noticeLines > 2 do table.remove(noticeLines, 1) end
+	if now >= noticeUntil then
+		noticeLines, noticeTitle = {}, false
+	end
+end
 
+function Vendor:ShowNotice()
 	if not notice then notice = BuildNotice() end
 	for index, line in ipairs(notice.lines) do
 		line:SetWidth(0)
 		line:SetText(noticeLines[index] or "")
 	end
 	FitNotice()
-	noticeUntil = now + NOTICE_LIFE
+	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
 	notice:Show()
+end
+
+-- One line, for whatever a visit has to say that is not a restock: why it bought nothing.
+function Vendor:Notice(text)
+	if not text or text == "" then return end
+	Reopen()
+	noticeLines[#noticeLines + 1] = text
+	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 1) end
+	self:ShowNotice()
+end
+
+-- A restock's own line. "Restocked" heads it once, however many items land, rather than
+-- being repeated on every line.
+function Vendor:NoticeRestock(text)
+	if not text or text == "" then return end
+	Reopen()
+	if not noticeTitle then
+		noticeTitle = true
+		table.insert(noticeLines, 1, "Restocked")
+	end
+	noticeLines[#noticeLines + 1] = text
+	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 2) end
+	self:ShowNotice()
 end
 
 -- A new visit starts with a clean notice, and so does a test.
 function Vendor:ClearNotice()
-	noticeLines = {}
+	noticeLines, noticeTitle = {}, false
 	noticeUntil = 0
 	if notice then
 		for _, line in ipairs(notice.lines) do line:SetText("") end
@@ -224,7 +248,7 @@ function Vendor:Land(itemID)
 		local said = ("%d %s for %s"):format(fresh, record.name or "item",
 			Coins(Cost(record, landed) - Cost(record, already)))
 		if #record.notes > 0 then said = said .. ": " .. table.concat(record.notes, ", ") end
-		self:Notice(said)
+		self:NoticeRestock(said)
 		self:RefreshWindow()
 	end
 
