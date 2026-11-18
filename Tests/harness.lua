@@ -58,6 +58,66 @@ local MACROS, MACTION, MACTION_TEXTURE = {}, {}, {}
 local PLAYER = { level = 60, health = 500, healthMax = 1000, mana = 500, manaMax = 1000 }
 local COMBAT = false
 
+---------------------------------------------------------------------------- merchant
+-- Two items the vendor tests need: one inside a level 40 band, one with no requirement.
+Item(9997, { name = "Trail Stew", class = 0, sub = 5, ilvl = 40, req = 35, lines = {
+	"Trail Stew", "Use: Restores 400 health over 20 sec. Must remain seated while eating." } })
+Item(5350, { name = "Conjured Bread", class = 0, sub = 5, ilvl = 5, req = 0, lines = {
+	"Conjured Bread", "Use: Restores 61 health over 15 sec. Must remain seated while eating." } })
+
+MERCHANT = { stock = {}, money = 100000, bought = {} }
+local function Stock(index, itemID, price, stack, available)
+	MERCHANT.stock[index] = { itemID = itemID, price = price, stack = stack or 5, available = available or 5 }
+end
+
+GetMerchantNumItems = function() return #MERCHANT.stock end
+GetMerchantItemID = function(index)
+	local entry = MERCHANT.stock[index]
+	return entry and entry.itemID or nil
+end
+GetMerchantItemLink = function(index)
+	local entry = MERCHANT.stock[index]
+	return entry and ("|Hitem:" .. entry.itemID .. "|h") or nil
+end
+GetMerchantItemMaxStack = function(index)
+	local entry = MERCHANT.stock[index]
+	return entry and entry.stack or 1
+end
+C_MerchantFrame = {
+	GetItemInfo = function(index)
+		local entry = MERCHANT.stock[index]
+		if not entry then return nil end
+		return { itemID = entry.itemID, price = entry.price, stackCount = entry.stack,
+			numAvailable = entry.available, isPurchasable = true }
+	end,
+}
+GetMoney = function() return MERCHANT.money end
+BuyMerchantItem = function(index, quantity)
+	local entry = MERCHANT.stock[index]
+	if not entry or quantity < 1 then return false end
+	local cost = entry.price * quantity
+	if cost > MERCHANT.money then return false end
+	MERCHANT.money = MERCHANT.money - cost
+	entry.available = math.max(0, entry.available - quantity)
+	MERCHANT.bought[#MERCHANT.bought + 1] = { itemID = entry.itemID, quantity = quantity }
+	for slot = 1, 16 do
+		BAGS[0] = BAGS[0] or {}
+		local held = BAGS[0][slot]
+		if held and held.itemID == entry.itemID then
+			held.count = held.count + quantity
+			return true
+		end
+	end
+	for slot = 1, 16 do
+		BAGS[0] = BAGS[0] or {}
+		if not BAGS[0][slot] then
+			BAGS[0][slot] = { itemID = entry.itemID, count = quantity }
+			return true
+		end
+	end
+	return false
+end
+
 --------------------------------------------------------------------------- client
 NUM_BAG_SLOTS, NUM_TOTAL_EQUIPPED_BAG_SLOTS = 4, 4
 Enum = { ItemClass = { Consumable = 0 }, ItemConsumableSubclass = { FoodDrink = 5 } }
@@ -140,6 +200,16 @@ local TOOLTIP = {
 		local held = BAGS[bag] and BAGS[bag][slot]
 		if not held then return end
 		for _, line in ipairs(ITEMS[held.itemID].lines or {}) do
+			regions[#regions + 1] = {
+				GetObjectType = function() return "FontString" end,
+				GetText = function() return line end,
+			}
+		end
+	end,
+	SetMerchantItem = function(_, index)
+		local entry = MERCHANT and MERCHANT.stock and MERCHANT.stock[index]
+		if not entry then return end
+		for _, line in ipairs(ITEMS[entry.itemID].lines or {}) do
 			regions[#regions + 1] = {
 				GetObjectType = function() return "FontString" end,
 				GetText = function() return line end,
@@ -321,6 +391,7 @@ local function Reset()
 	PLAYER = { level = 60, health = 500, healthMax = 1000, mana = 500, manaMax = 1000 }
 	COMBAT = false
 	BestBiteDB, ns.db = nil, nil
+	MERCHANT = { stock = {}, money = 100000, bought = {} }
 end
 
 local function Put(bagID, slot, itemID, count, locked)
@@ -869,6 +940,21 @@ C_Container.GetContainerItemInfo = function() error("boom", 0) end
 slash("food")
 Check("error: a failing client call is reported", Said("could not stock the click buttons"), MESSAGES[1])
 C_Container.GetContainerItemInfo = realSlotInfo
+
+-- A merchant's item is read from its own tooltip, the same way a bag item is.
+Reset()
+Stock(1, 422, 25, 5, 5)
+local mercKind, mercAmount = ns.Detect:ScanMerchant(1)
+Check("vendor: a merchant item's kind is read from its tooltip", mercKind == "food", tostring(mercKind))
+Check("vendor: and the amount it restores", mercAmount == 243, tostring(mercAmount))
+
+Stock(2, 2001, 30, 5, 5)
+local _, _, mercBuffs = ns.Detect:ScanMerchant(2)
+Check("vendor: a merchant item's buff points are read", ns.Detect:Points(mercBuffs) == 12,
+	tostring(ns.Detect:Points(mercBuffs)))
+
+local unknown = ns.Detect:ScanMerchant(99)
+Check("vendor: an index the merchant does not have reads as nothing", unknown == nil, tostring(unknown))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

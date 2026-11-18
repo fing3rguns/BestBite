@@ -101,14 +101,9 @@ local function StripColors(text)
 	return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
 end
 
--- kind, amount and any Well Fed points for the item in the slot; each nil when its
--- tooltip says nothing of the sort.
-function Detect:Scan(bag, slot)
-	BestBite:Step("scanning an item tooltip")
-	tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
-	tooltip:ClearLines()
-	tooltip:SetBagItem(bag, slot)
-
+-- kind, amount and any Well Fed points for whatever the tooltip is currently showing;
+-- each nil when its lines say nothing of the sort.
+local function ReadGoods()
 	local kind, amount, buffs
 	for _, region in ipairs({ tooltip:GetRegions() }) do
 		if region.GetObjectType and region:GetObjectType() == "FontString" then
@@ -130,7 +125,31 @@ function Detect:Scan(bag, slot)
 			end
 		end
 	end
+	return kind, amount, buffs
+end
 
+-- kind, amount and any Well Fed points for the item in the slot.
+function Detect:Scan(bag, slot)
+	BestBite:Step("scanning an item tooltip")
+	tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+	tooltip:ClearLines()
+	tooltip:SetBagItem(bag, slot)
+	local kind, amount, buffs = ReadGoods()
+	tooltip:ClearLines()
+	return kind, amount, buffs
+end
+
+-- The same for the item a merchant is selling, which only the tooltip can tell us about.
+function Detect:ScanMerchant(index)
+	BestBite:Step("scanning a merchant item tooltip")
+	tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
+	tooltip:ClearLines()
+	if tooltip.SetMerchantItem then
+		tooltip:SetMerchantItem(index)
+	elseif tooltip.SetHyperlink and GetMerchantItemLink and GetMerchantItemLink(index) then
+		tooltip:SetHyperlink(GetMerchantItemLink(index))
+	end
+	local kind, amount, buffs = ReadGoods()
 	tooltip:ClearLines()
 	return kind, amount, buffs
 end
