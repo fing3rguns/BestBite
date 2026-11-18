@@ -483,6 +483,9 @@ local function Reset()
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
 	ns.Vendor.fallbackDone = {}
 	wipe(ns.Vendor.pending)
+	-- The notice above the character is a floating frame, so a line from the last check
+	-- would otherwise still be up in this one.
+	ns.Vendor:ClearNotice()
 end
 
 local function Put(bagID, slot, itemID, count, locked)
@@ -495,6 +498,27 @@ local function Said(text)
 		if message:find(text, 1, true) then return true end
 	end
 	return false
+end
+
+-- What the notice above the character's head is showing, if it is up at all.
+local function Noticed(text)
+	local frame = _G.BestBiteNotice
+	if not (frame and frame.lines and frame.shown) then return false end
+	for _, line in ipairs(frame.lines) do
+		if (line:GetText() or ""):find(text, 1, true) then return true end
+	end
+	return false
+end
+
+local function NoticeText()
+	local frame = _G.BestBiteNotice
+	if not (frame and frame.lines) then return "" end
+	local parts = {}
+	for _, line in ipairs(frame.lines) do
+		local text = line:GetText() or ""
+		if text ~= "" then parts[#parts + 1] = text end
+	end
+	return table.concat(parts, " / ")
 end
 
 -- /bb debug writes its report into the window now, not the chat frame.
@@ -1151,7 +1175,7 @@ Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 
 Check("vendor: water is bought up to the target", ns.Vendor:Count("water", 60) == 5,
 	tostring(ns.Vendor:Count("water", 60)))
 Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
-Check("vendor: and it said what it bought", Said("bought"), table.concat(MESSAGES, " / "))
+Check("vendor: and it said what it bought, above the character", Noticed("bought"), NoticeText())
 
 -- Part of a target is topped up, not a whole one.
 Reset()
@@ -1230,7 +1254,7 @@ ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: short money buys what it can", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and says it fell short", Said("short"), table.concat(MESSAGES, " / "))
+Check("vendor: and says it fell short", Noticed("short"), NoticeText())
 
 -- Nothing good for the level is sold: the best usable one is bought as a fallback.
 Reset()
@@ -1240,7 +1264,7 @@ ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: a fallback is bought when nothing is in band", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and it says it was a fallback", Said("below your level"), table.concat(MESSAGES, " / "))
+Check("vendor: and it says it was a fallback", Noticed("below your level"), NoticeText())
 
 -- A weak item never outranks one of the band on the same vendor.
 Reset()
@@ -1314,7 +1338,7 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: a stack of five priced at 100 buys five items", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
-Check("vendor: and the report is the true cost", Said("bought 5 Raid Food for 100c"),
+Check("vendor: and the report is the true cost", Noticed("bought 5 Raid Food for 1"),
 	table.concat(MESSAGES, " / "))
 Check("vendor: which is what left the purse", MERCHANT.money == 99900, tostring(MERCHANT.money))
 
@@ -1328,9 +1352,9 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: money buys as many items as it covers", ns.Vendor:Count("food", 60) == 2,
 	tostring(ns.Vendor:Count("food", 60)))
-Check("vendor: and the cost of those two is reported", Said("bought 2 Raid Food for 40c"),
+Check("vendor: and the cost of those two is reported", Noticed("bought 2 Raid Food for 40"),
 	table.concat(MESSAGES, " / "))
-Check("vendor: and what the money could not cover", Said("3 short"), table.concat(MESSAGES, " / "))
+Check("vendor: and what the money could not cover", Noticed("3 short"), NoticeText())
 
 -- More items than the merchant sells in one purchase arrive in several calls, each of them
 -- within the purchase limit: twelve at most, so ten at a time for a five-item stack.
@@ -1365,17 +1389,21 @@ Check("vendor: the visit buys the shortfall", #MERCHANT.bought == 1, tostring(#M
 Fire("MERCHANT_UPDATE")
 Check("vendor: a purchase not landed is not bought again", #MERCHANT.bought == 1,
 	tostring(#MERCHANT.bought))
-Check("vendor: and is not reported before it lands", not Said("bought"), table.concat(MESSAGES, " / "))
+Check("vendor: and is not reported before it lands", not Noticed("bought"), NoticeText())
+Check("vendor: and nothing about the purchase goes to chat", not Said("bought"),
+	table.concat(MESSAGES, " / "))
 Land()
 Fire("MERCHANT_UPDATE")
 Check("vendor: once it lands it is not bought again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 Check("vendor: and it is reported once", (function()
 	local bought = 0
-	for _, message in ipairs(MESSAGES) do
-		if message:find("bought", 1, true) then bought = bought + 1 end
+	for _, line in ipairs(_G.BestBiteNotice and _G.BestBiteNotice.lines or {}) do
+		local text = line:GetText() or ""
+		local _, count = text:gsub("bought", "bought")
+		bought = bought + count
 	end
 	return bought == 1
-end)(), table.concat(MESSAGES, " / "))
+end)(), NoticeText())
 Check("vendor: the bags hold what was bought", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
 
@@ -1400,7 +1428,7 @@ Stock(1, 422, 50, 5, 20)
 Fire("MERCHANT_SHOW")
 Check("vendor: a new visit does not buy another weak stack beside the one carried",
 	#MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and says the carried food is below the level", Said("below your level"),
+Check("vendor: and says the carried food is below the level", Noticed("below your level"),
 	table.concat(MESSAGES, " / "))
 MERCHANT.bought = {}
 Check("vendor: a Buy now press buys the weak item again anyway",
@@ -1465,7 +1493,7 @@ Stock(1, 2011, 10, 5, 20)   -- Mystery Morsel: food by class, no restore line to
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
-Check("vendor: food it cannot read is said", Said("could not read"), table.concat(MESSAGES, " / "))
+Check("vendor: food it cannot read is said", Noticed("could not read"), NoticeText())
 
 -- A vendor that sells the kind but has none left says that rather than nothing.
 Reset()
@@ -1474,7 +1502,7 @@ Stock(1, 9999, 40, 5, 0)
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
-Check("vendor: a vendor with none left is said", Said("no food here it could buy"),
+Check("vendor: a vendor with none left is said", Noticed("no food here it could buy"),
 	table.concat(MESSAGES, " / "))
 
 -- Buy now with no vendor open says so instead of doing nothing.
@@ -1558,7 +1586,7 @@ local boughtKinds = {}
 for _, buy in ipairs(MERCHANT.bought) do boughtKinds[buy.itemID] = true end
 Check("vendor: food and water below the band are both bought", boughtKinds[2003] and boughtKinds[159],
 	table.concat(MESSAGES, " / "))
-Check("vendor: and both are said to be below the level", Said("below your level"),
+Check("vendor: and both are said to be below the level", Noticed("below your level"),
 	table.concat(MESSAGES, " / "))
 
 -- An item needing a higher level is not a fallback: it cannot be used at all.
@@ -1570,8 +1598,15 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: an item needing a higher level is never bought", #MERCHANT.bought == 0,
 	tostring(#MERCHANT.bought))
-Check("vendor: and the vendor reads as having nothing to buy", Said("no food here it could buy"),
+Check("vendor: and the vendor reads as having nothing to buy", Noticed("no food here it could buy"),
 	table.concat(MESSAGES, " / "))
+
+-- Money reads as gold, silver and copper with the client's own coin icons, not as "450c".
+Check("vendor: copper alone reads as copper", ns.Vendor.Coins(450):find("4|T", 1, true) ~= nil
+	and ns.Vendor.Coins(450):find("50|T", 1, true) ~= nil, ns.Vendor.Coins(450))
+Check("vendor: gold and silver are broken out", ns.Vendor.Coins(77575):find("7|T", 1, true) ~= nil
+	and ns.Vendor.Coins(77575):find("75|T", 1, true) ~= nil, ns.Vendor.Coins(77575))
+Check("vendor: no bare c suffix is left", not ns.Vendor.Coins(450):find("c$"), ns.Vendor.Coins(450))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

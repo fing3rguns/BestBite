@@ -73,8 +73,72 @@ local function Cost(record, items)
 end
 
 local function Coins(amount)
-	if GetCoinTextureString then return GetCoinTextureString(amount) end
-	return ("%dc"):format(amount)
+	amount = math.floor((tonumber(amount) or 0) + 0.5)
+	if amount < 0 then amount = 0 end
+	local gold = math.floor(amount / 10000)
+	local silver = math.floor(amount / 100) % 100
+	local copper = amount % 100
+	local parts = {}
+	local function Part(count, icon)
+		parts[#parts + 1] = count .. "|TInterface\\MoneyFrame\\UI-" .. icon .. "Icon:0:0|t"
+	end
+	if gold > 0 then Part(gold, "Gold") end
+	if silver > 0 or gold > 0 then Part(silver, "Silver") end
+	Part(copper, "Copper")
+	return table.concat(parts, " ")
+end
+Vendor.Coins = Coins
+
+-- What a visit did is said above the character's head rather than in chat, where a busy
+-- channel swallows it. Two lines at most, one per kind, and it goes away on its own.
+local NOTICE_LIFE = 5
+local notice, noticeLines, noticeUntil = nil, {}, 0
+
+local function BuildNotice()
+	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent)
+	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+	frame:SetSize(400, 44)
+	frame:SetFrameStrata("HIGH")
+	frame:SetFrameLevel(50)
+	frame.lines = {}
+	for index = 1, 2 do
+		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+		line:SetPoint("CENTER", frame, "CENTER", 0, (2 - index) * 18 - 9)
+		line:SetJustifyH("CENTER")
+		line:SetText("")
+		frame.lines[index] = line
+	end
+	frame:SetScript("OnUpdate", function(self)
+		if (GetTime() or 0) >= noticeUntil then self:Hide() end
+	end)
+	return frame
+end
+
+-- Adds one line to the notice. A purchase reports after the visit that made it, so the lines
+-- are kept while the notice is up rather than each one replacing the last.
+function Vendor:Notice(text)
+	if not text or text == "" then return end
+	local now = GetTime and GetTime() or 0
+	if now >= noticeUntil then noticeLines = {} end
+	noticeLines[#noticeLines + 1] = text
+	while #noticeLines > 2 do table.remove(noticeLines, 1) end
+
+	if not notice then notice = BuildNotice() end
+	for index, line in ipairs(notice.lines) do
+		line:SetText(noticeLines[index] or "")
+	end
+	noticeUntil = now + NOTICE_LIFE
+	notice:Show()
+end
+
+-- A new visit starts with a clean notice, and so does a test.
+function Vendor:ClearNotice()
+	noticeLines = {}
+	noticeUntil = 0
+	if notice then
+		for _, line in ipairs(notice.lines) do line:SetText("") end
+		notice:Hide()
+	end
 end
 
 -- Says what has landed of a purchase, once per landing and for what those items cost, and
@@ -93,7 +157,7 @@ function Vendor:Land(itemID)
 		local said = ("bought %d %s for %s"):format(fresh, record.name or "item",
 			Coins(Cost(record, landed) - Cost(record, already)))
 		if #record.notes > 0 then said = said .. ": " .. table.concat(record.notes, ", ") end
-		BestBite:Print(said)
+		self:Notice(said)
 		self:RefreshWindow()
 	end
 
@@ -351,7 +415,6 @@ function Vendor:Restock(explicit)
 	-- A purchase made a moment ago may be in the bags by now; saying so costs nothing and
 	-- happens before anything else the visit does.
 	self:ReportLanded()
-
 	-- An explicit purchase always gets a fresh attempt at a fallback.
 	if explicit then wipe(self.fallbackDone) end
 
@@ -410,7 +473,9 @@ function Vendor:Restock(explicit)
 		end
 	end
 
-	if #said > 0 then BestBite:Print(table.concat(said, "; ")) end
+	if #said > 0 then
+		for _, line in ipairs(said) do self:Notice(line) end
+	end
 	if didSomething then self:RefreshWindow() end
 	return didSomething
 end
@@ -528,6 +593,9 @@ events:SetScript("OnEvent", function(_, event)
 		return
 	end
 	-- Opening a merchant starts a new visit, so a weak item may be bought once again.
-	if event == "MERCHANT_SHOW" then wipe(Vendor.fallbackDone) end
+	if event == "MERCHANT_SHOW" then
+		wipe(Vendor.fallbackDone)
+		Vendor:ClearNotice()
+	end
 	Vendor:Request()
 end)
