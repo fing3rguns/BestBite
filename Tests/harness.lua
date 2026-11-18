@@ -956,6 +956,19 @@ Check("vendor: a merchant item's buff points are read", ns.Detect:Points(mercBuf
 local unknown = ns.Detect:ScanMerchant(99)
 Check("vendor: an index the merchant does not have reads as nothing", unknown == nil, tostring(unknown))
 
+-- The ordering that picks from the bags is the same one a vendor purchase uses.
+Reset()
+local prefer = ns.Consume:PreferBuffs("food")
+Check("vendor: buff food leads when nothing is banked", prefer == true)
+
+local plain = { amount = 500, points = 0, itemLevel = 20, count = 1 }
+local buffed = { amount = 61, points = 12, itemLevel = 20, count = 1 }
+Check("vendor: the ranking puts buff food first", ns.Consume:Better(buffed, plain, true) == true)
+Check("vendor: and plain food first when the buff is banked", ns.Consume:Better(plain, buffed, false) == true)
+Check("vendor: more restore wins on equal points",
+	ns.Consume:Better({ amount = 500, points = 0, itemLevel = 1, count = 1 },
+		{ amount = 100, points = 0, itemLevel = 60, count = 9 }, false) == true)
+
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)

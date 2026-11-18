@@ -11,17 +11,48 @@ local Detect = ns.Detect
 local Consume = {}
 ns.Consume = Consume
 
+-- Whether buff food should lead. While a food buff is banked, buff food is no longer the
+-- best food: the buff is already paid for, so the biggest restore wins until it is nearly
+-- spent (Buffs.lua).
+function Consume:PreferBuffs(kind)
+	if kind == "food" and ns.Buffs then
+		local ok, banked = pcall(ns.Buffs.Banked, ns.Buffs)
+		if ok then return not banked end
+	end
+	return true
+end
+
+-- The ordering, in one place: buff food first while it is wanted, then the most points, the
+-- most restored, the higher item level, and finally the bigger stack. Shared by what the
+-- bags hold and what a merchant sells, so a purchase is the item the buttons would use.
+function Consume:Better(candidate, best, preferBuffs)
+	if not best then return true end
+	local points, bestPoints = candidate.points or 0, best.points or 0
+	if (points > 0) ~= (bestPoints > 0) then
+		if preferBuffs then
+			return points > 0
+		end
+		return bestPoints > 0
+	end
+	if points ~= bestPoints then return points > bestPoints end
+
+	local amount, bestAmount = candidate.amount or 0, best.amount or 0
+	if amount ~= bestAmount then return amount > bestAmount end
+
+	local itemLevel, bestItemLevel = candidate.itemLevel or 0, best.itemLevel or 0
+	if itemLevel ~= bestItemLevel then return itemLevel > bestItemLevel end
+
+	return (candidate.count or 0) > (best.count or 0)
+end
+
 -- The best item of `kind` the character can use right now:
--- { bag, slot, itemID, name, amount, points }, or nil when the bags hold none.
--- Food that buffs a stat counts for more than food that does not, however much the
--- plain one restores: a Well Fed bonus outlasts one meal's worth of health. That holds
--- while the buff is missing or nearly spent. With the buff banked it inverts, and the
--- food that restores the most wins instead, since the buff is already paid for.
+-- { bag, slot, itemID, name, amount, points, itemLevel, count }, or nil when the bags hold
+-- none.
 function Consume:Find(kind)
 	local level = UnitLevel("player")
 	local now = GetTime()
-	local preferBuffs = not (kind == "food" and ns.Buffs and ns.Buffs:Banked(now))
-	local best, bestPoints, bestAmount, bestItemLevel, bestCount
+	local preferBuffs = self:PreferBuffs(kind)
+	local best
 
 	for bag = 0, API.NumBags() do
 		for slot = 1, API.NumSlots(bag) do
@@ -34,31 +65,12 @@ function Consume:Find(kind)
 				if ready and levelOkay and API.IsUsable(item.itemID) then
 					local itemKind, amount, buffs = Detect:Describe(bag, slot, item.itemID)
 					if itemKind == kind then
-						local points = Detect:Points(buffs)
-						amount, itemLevel = amount or 0, itemLevel or 0
-						local better
-						if not best then
-							better = true
-						elseif (points > 0) ~= (bestPoints > 0) then
-							if preferBuffs then
-								better = points > 0
-							else
-								better = bestPoints > 0
-							end
-						elseif points ~= bestPoints then
-							better = points > bestPoints
-						elseif amount ~= bestAmount then
-							better = amount > bestAmount
-						elseif itemLevel ~= bestItemLevel then
-							better = itemLevel > bestItemLevel
-						else
-							better = item.count > bestCount
-						end
-						if better then
-							best = { bag = bag, slot = slot, itemID = item.itemID, name = name,
-								amount = amount, points = points }
-							bestPoints, bestAmount, bestItemLevel, bestCount = points, amount, itemLevel, item.count
-						end
+						local candidate = {
+							bag = bag, slot = slot, itemID = item.itemID, name = name,
+							amount = amount or 0, points = Detect:Points(buffs),
+							itemLevel = itemLevel or 0, count = item.count,
+						}
+						if self:Better(candidate, best, preferBuffs) then best = candidate end
 					end
 				end
 			end
