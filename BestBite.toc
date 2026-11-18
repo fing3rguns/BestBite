@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: BestBite
 ## Notes: Two buttons hold the best food or water in your bags; macros can /click BestBiteFood. /bb opens the window.
-## Version: 1.4.9
+## Version: 1.4.10
 ## SavedVariables: BestBiteDB
 ## IconTexture: Interface\AddOns\BestBite\Icon.png
 ## X-Category: Inventory

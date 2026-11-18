@@ -221,7 +221,7 @@ function Vendor:Land(itemID)
 	if fresh > 0 then
 		local already = record.reported
 		record.reported = landed
-		local said = ("restocked %d %s for %s"):format(fresh, record.name or "item",
+		local said = ("%d %s for %s"):format(fresh, record.name or "item",
 			Coins(Cost(record, landed) - Cost(record, already)))
 		if #record.notes > 0 then said = said .. ": " .. table.concat(record.notes, ", ") end
 		self:Notice(said)

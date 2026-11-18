@@ -449,8 +449,8 @@ local function RunCommand(message)
 			return
 		end
 		vendor:ClearNotice()
-		vendor:Notice(("restocked %d %s for %s"):format(5, "Homemade Cherry Pie", vendor.Coins(36)))
-		vendor:Notice(("restocked %d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
+		vendor:Notice(("%d %s for %s"):format(5, "Homemade Cherry Pie", vendor.Coins(36)))
+		vendor:Notice(("%d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
 	elseif command == "debug" then
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else
