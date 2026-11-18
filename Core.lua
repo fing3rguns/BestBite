@@ -238,6 +238,7 @@ function BestBite:Help()
 	frame:AddMessage("  /bb macroicon - also rewrite the macro's own icon, if this client allows it")
 	frame:AddMessage("  /bb reset - forget the items it has learned")
 	frame:AddMessage("  /bb debug - report what it sees")
+	frame:AddMessage("  /bb vendor - what restocking sees at the vendor that is open")
 end
 
 -- Why the commands cannot do the job themselves, and the macro that can, said once
@@ -288,6 +289,10 @@ function BestBite:DebugLines()
 		local food, water = ns.Buttons:Stocked()
 		Say(("buttons: food %s | water %s"):format(food or "empty", water or "empty"))
 		Say("macros: /click BestBiteFood and /click BestBiteWater")
+	end
+	if ns.Vendor then
+		local db = ns.Vendor:Db()
+		Say(("restock: %s, keep %d"):format(db.on and "on" or "off", db.target or ns.Vendor.TARGET_MIN))
 	end
 	Say(("health %s/%s | mana %s/%s | hasMana %s"):format(
 		Asked(function() return UnitHealth("player") end, "?"),
@@ -427,6 +432,9 @@ local function RunCommand(message)
 		db.writeMacroIcons = not db.writeMacroIcons
 		BestBite:Print("Rewriting the macro's own icon: " .. (db.writeMacroIcons and "on" or "off"))
 		if db.writeMacroIcons and ns.Icons then ns.Icons:Request(0) end
+	elseif command == "vendor" then
+		local lines = ns.Vendor and ns.Vendor:Lines() or { "Vendor.lua did not load" }
+		for _, line in ipairs(lines) do BestBite:Print("vendor: " .. line) end
 	elseif command == "debug" then
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
 	else

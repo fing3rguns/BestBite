@@ -306,13 +306,34 @@ function Vendor:Buy(pick, shortfall)
 	return bought, rest, reason
 end
 
+-- Whether this vendor sells anything of a kind, and whether it sells food or water it could
+-- not read: a purchase that found nothing has to be told apart from a vendor that sells none.
+function Vendor:Stock(kind)
+	local found, unread = false, false
+	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
+		local itemID = self:Merchant(index)
+		if itemID and API.IsFoodDrink(itemID) then
+			local itemKind = Detect:ScanMerchant(index)
+			if itemKind == kind then
+				found = true
+			elseif itemKind == nil then
+				unread = true
+			end
+		end
+	end
+	return found, unread
+end
+
 -- One merchant visit: top up whichever kinds are short, then say what happened in one line.
 -- A kind the vendor does not sell is only mentioned when someone asked for the purchase
 -- (the Buy now button); an automatic visit at every merchant stays quiet about absences.
 function Vendor:Restock(explicit)
 	if InCombatLockdown and InCombatLockdown() then return false, "in combat" end
 	if not (explicit or self:Db().on) then return false end
-	if not (GetMerchantNumItems and GetMerchantNumItems() > 0) then return false, "no merchant" end
+	if not (GetMerchantNumItems and GetMerchantNumItems() > 0) then
+		if explicit then BestBite:Print("no vendor is open") end
+		return false, "no merchant"
+	end
 
 	-- A purchase made a moment ago may be in the bags by now; saying so costs nothing and
 	-- happens before anything else the visit does.
@@ -354,6 +375,17 @@ function Vendor:Restock(explicit)
 				end
 			elseif explicit then
 				said[#said + 1] = "nothing at this vendor is " .. kind
+			elseif not pick then
+				-- An automatic visit that buys nothing has to say why, or a read that fails
+				-- in the client looks exactly like a feature that does nothing.
+				local found, unread = self:Stock(kind)
+				if unread then
+					said[#said + 1] = "it could not read what this vendor sells for " .. kind
+				elseif found then
+					said[#said + 1] = "no " .. kind .. " here it could buy"
+				end
+			else
+				said[#said + 1] = "the " .. kind .. " here is below your level"
 			end
 		end
 	end
@@ -363,17 +395,77 @@ function Vendor:Restock(explicit)
 	return didSomething
 end
 
--- MERCHANT_UPDATE arrives in bursts: one visit is one attempt.
+-- What restocking sees right now, line by line, for `/bb vendor`: the setting as it will be
+-- saved, the Polestar gate, the bags, and every item this vendor sells with the kind that
+-- was read for it. A feature that does nothing at a vendor is otherwise indistinguishable
+-- from a read that came back empty.
+function Vendor:Lines()
+	local lines = {}
+	local db = self:Db()
+	local target = db.target or self.TARGET_MIN
+	local level = UnitLevel("player") or 0
+	lines[#lines + 1] = ("restock %s, keep %d, level %d"):format(db.on and "on" or "off", target, level)
+
+	local saved = type(BestBiteDB) == "table" and type(BestBiteDB.vendor) == "table"
+	lines[#lines + 1] = "saved in BestBiteDB: " .. (saved and "yes" or "no")
+
+	local stood, why = self:StandDown()
+	lines[#lines + 1] = stood and ("Polestar keeps it: " .. tostring(why))
+		or "Polestar does not keep food or water"
+
+	local merchant = GetMerchantNumItems and GetMerchantNumItems() or 0
+	lines[#lines + 1] = ("vendor: %d items, money %s"):format(merchant, Coins(GetMoney and GetMoney() or 0))
+	if merchant < 1 then
+		lines[#lines + 1] = "no vendor open"
+		return lines
+	end
+
+	for _, kind in ipairs({ "food", "water" }) do
+		local shortfall, have = self:Shortfall(kind)
+		lines[#lines + 1] = ("%s: %d carried, %d short"):format(kind, have, shortfall)
+		local pick, fellBack = self:Pick(kind)
+		if pick then
+			lines[#lines + 1] = ("  picks %s (%d): %d per %d, %d available%s"):format(
+				(API.ItemInfo(pick.itemID)) or ("item " .. tostring(pick.itemID)), pick.itemID,
+				pick.price or 0, pick.stack or 1, pick.available or 0,
+				fellBack and ", below your level" or "")
+		else
+			lines[#lines + 1] = "  nothing of that kind here"
+		end
+	end
+
+	for index = 1, merchant do
+		local itemID, price, stack, available = self:Merchant(index)
+		if itemID then
+			lines[#lines + 1] = ("[%d] %s (%d) %s: %d per %d, %d available%s"):format(index,
+				(API.ItemInfo(itemID)) or "unread", itemID, Detect:ScanMerchant(index) or "not food or water",
+				price or 0, stack or 1, available or 0,
+				self:LevelAppropriate(itemID, level) and "" or ", outside your band")
+		end
+	end
+	return lines
+end
+
+-- MERCHANT_UPDATE arrives in bursts: one visit is one attempt. A merchant whose goods are
+-- not readable yet (the client fills them in shortly after the frame opens) is tried again,
+-- so a slow open is not mistaken for a vendor with nothing to sell.
 local scheduled = false
-function Vendor:Request()
+function Vendor:Request(attempt)
+	attempt = attempt or 1
 	if scheduled then return end
 	scheduled = true
 	local function run()
 		scheduled = false
 		local ok, err = pcall(Vendor.Restock, Vendor, false)
-		if not ok and not Vendor.warned then
-			Vendor.warned = true
-			BestBite:Print("could not restock from this vendor: " .. tostring(err))
+		if not ok then
+			if not Vendor.warned then
+				Vendor.warned = true
+				BestBite:Print("could not restock from this vendor: " .. tostring(err))
+			end
+			return
+		end
+		if attempt < 3 and GetMerchantNumItems and GetMerchantNumItems() == 0 and C_Timer and C_Timer.After then
+			C_Timer.After(0.5, function() Vendor:Request(attempt + 1) end)
 		end
 	end
 	if C_Timer and C_Timer.After then

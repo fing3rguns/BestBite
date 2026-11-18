@@ -208,6 +208,7 @@ local function Build(self)
 			if not vendor then return end
 			local db = vendor:Db()
 			db.on = not db.on
+			BestBite:Print("Restock from vendors: " .. (db.on and "on" or "off"))
 			Window:Refresh()
 		end)
 	end)

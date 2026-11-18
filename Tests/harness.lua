@@ -56,6 +56,8 @@ Item(2010, { name = "Banquet Portions", class = 0, sub = 5, ilvl = 55, req = 55,
 	"Well Fed: Stamina increased by 14." } })
 Item(8770, { name = "Sparkling Spring Water", class = 0, sub = 5, ilvl = 55, req = 55, lines = {
 	"Sparkling Spring Water", "Use: Restores 1344 mana over 24 sec. Must remain seated while drinking." } })
+Item(2011, { name = "Mystery Morsel", class = 0, sub = 5, ilvl = 20, req = 1, lines = {
+	"Mystery Morsel", "Use: Something the tooltip does not spell out." } })
 
 ---------------------------------------------------------------------------- state
 local BAGS, COOLDOWNS, MESSAGES = {}, {}, {}
@@ -866,6 +868,7 @@ slash("")
 ns.Window.switches.vendor.scripts.OnClick()
 Check("window: the vendor switch turns restocking on", ns.Vendor:Db().on == true)
 Check("window: and the switch shows it on", ns.Window.switches.vendor.on == true)
+Check("window: and says what it now is", Said("Restock from vendors: on"), table.concat(MESSAGES, " / "))
 ns.Window.switches.vendor.scripts.OnClick()
 Check("window: the vendor switch turns it off again", ns.Vendor:Db().on == false)
 
@@ -1400,6 +1403,46 @@ Check("window: and says so in chat", Said("error:"), table.concat(MESSAGES, " / 
 local boughtOK = pcall(ns.Window.buttons.vendorBuy.scripts.OnClick)
 Check("window: a failing Buy now is reported, not raised", boughtOK, tostring(boughtOK))
 GetMerchantNumItems = realMerchant
+
+-- What restocking sees, for when it looks like it did nothing.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 10 } }
+slash("vendor")
+Check("vendor: /bb vendor says the setting and the keep", Said("restock on, keep 10, level 60"),
+	table.concat(MESSAGES, " / "))
+Check("vendor: and says the setting is saved", Said("saved in BestBiteDB: yes"),
+	table.concat(MESSAGES, " / "))
+Check("vendor: and what this vendor sells", Said("Raid Food"), table.concat(MESSAGES, " / "))
+
+-- Food it cannot read is said, not passed over in silence.
+Reset()
+PLAYER.level = 60
+Stock(1, 2011, 10, 5, 20)   -- Mystery Morsel: food by class, no restore line to read
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: food it cannot read is said", Said("could not read"), table.concat(MESSAGES, " / "))
+
+-- A vendor that sells the kind but has none left says that rather than nothing.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 0)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a vendor with none left is said", Said("no food here it could buy"),
+	table.concat(MESSAGES, " / "))
+
+-- Buy now with no vendor open says so instead of doing nothing.
+Reset()
+ns.db = nil
+BestBiteDB = { vendor = { on = false, target = 5 } }
+ns.Vendor:Restock(true)
+Check("vendor: Buy now with no vendor open says so", Said("no vendor is open"),
+	table.concat(MESSAGES, " / "))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
