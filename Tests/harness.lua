@@ -71,8 +71,33 @@ Item(5350, { name = "Conjured Bread", class = 0, sub = 5, ilvl = 5, req = 0, lin
 	"Conjured Bread", "Use: Restores 61 health over 15 sec. Must remain seated while eating." } })
 
 MERCHANT = { stock = {}, money = 100000, bought = {} }
-local function Stock(index, itemID, price, stack, available)
-	MERCHANT.stock[index] = { itemID = itemID, price = price, stack = stack or 5, available = available or 5 }
+
+-- `price` is what one purchase of `stack` items costs (the client prices a purchase, not an
+-- item), and `available` counts items, with -1 for unlimited as the client reports it.
+local function Stock(index, itemID, price, stack, available, maxStack)
+	MERCHANT.stock[index] = {
+		itemID = itemID, price = price, stack = stack or 5,
+		available = available or 5, maxStack = maxStack or stack or 5,
+	}
+end
+
+-- Puts items in the bags, onto a stack that already holds them or into a free slot.
+local function Give(itemID, quantity)
+	BAGS[0] = BAGS[0] or {}
+	for slot = 1, 16 do
+		local held = BAGS[0][slot]
+		if held and held.itemID == itemID then
+			held.count = held.count + quantity
+			return true
+		end
+	end
+	for slot = 1, 16 do
+		if not BAGS[0][slot] then
+			BAGS[0][slot] = { itemID = itemID, count = quantity }
+			return true
+		end
+	end
+	return false
 end
 
 GetMerchantNumItems = function() return #MERCHANT.stock end
@@ -86,7 +111,7 @@ GetMerchantItemLink = function(index)
 end
 GetMerchantItemMaxStack = function(index)
 	local entry = MERCHANT.stock[index]
-	return entry and entry.stack or 1
+	return entry and entry.maxStack or 1
 end
 C_MerchantFrame = {
 	GetItemInfo = function(index)
@@ -97,30 +122,36 @@ C_MerchantFrame = {
 	end,
 }
 GetMoney = function() return MERCHANT.money end
+
+-- The client's BuyMerchantItem takes an item count, charges for the share of the purchase
+-- price those items are, and answers nothing: whether it happened only shows in the bags a
+-- moment later. `MERCHANT.hold` keeps that moment from arriving until Land() is called,
+-- which is how a purchase still on its way is put in front of the addon.
 BuyMerchantItem = function(index, quantity)
 	local entry = MERCHANT.stock[index]
-	if not entry or quantity < 1 then return false end
-	local cost = entry.price * quantity
-	if cost > MERCHANT.money then return false end
+	if not entry or quantity < 1 then return end
+	local cost = math.floor(entry.price * quantity / (entry.stack or 1) + 0.5)
+	if cost > MERCHANT.money then return end
 	MERCHANT.money = MERCHANT.money - cost
-	entry.available = math.max(0, entry.available - quantity)
-	MERCHANT.bought[#MERCHANT.bought + 1] = { itemID = entry.itemID, quantity = quantity }
-	for slot = 1, 16 do
-		BAGS[0] = BAGS[0] or {}
-		local held = BAGS[0][slot]
-		if held and held.itemID == entry.itemID then
-			held.count = held.count + quantity
-			return true
-		end
+	if entry.available >= 0 then
+		entry.available = math.max(0, entry.available - quantity)
 	end
-	for slot = 1, 16 do
-		BAGS[0] = BAGS[0] or {}
-		if not BAGS[0][slot] then
-			BAGS[0][slot] = { itemID = entry.itemID, count = quantity }
-			return true
-		end
+	MERCHANT.bought[#MERCHANT.bought + 1] = { itemID = entry.itemID, quantity = quantity, cost = cost }
+	if MERCHANT.hold then
+		MERCHANT.held = MERCHANT.held or {}
+		MERCHANT.held[#MERCHANT.held + 1] = { itemID = entry.itemID, quantity = quantity }
+		return
 	end
-	return false
+	Give(entry.itemID, quantity)
+end
+
+-- The purchases held back arrive in the bags, as they do a moment after the real purchase.
+local function Land()
+	local held = MERCHANT.held or {}
+	MERCHANT.held = {}
+	for _, purchase in ipairs(held) do
+		Give(purchase.itemID, purchase.quantity)
+	end
 end
 
 --------------------------------------------------------------------------- client
@@ -224,7 +255,9 @@ local TOOLTIP = {
 }
 
 -- A frame of any other kind: the window builds itself out of these, so every method a
--- frame might have answers instead of the harness having to list them all.
+-- frame might have answers instead of the harness having to list them all. The events a
+-- frame registers are kept, so a test can fire one (Fire, below).
+local EVENT_FRAMES = {}
 local function Region(parent)
 	local region = { parent = parent }
 	region.SetPoint = function() end
@@ -252,7 +285,10 @@ local function InterfaceFrame(name)
 	local frame = Region(nil)
 	frame.shown = false
 	frame.scripts = {}
+	frame.registrations = {}
 	function frame:SetScript(event, fn) self.scripts[event] = fn end
+	function frame:RegisterEvent(event) self.registrations[event] = true end
+	function frame:UnregisterEvent(event) self.registrations[event] = nil end
 	function frame:Show() self.shown = true end
 	function frame:Hide() self.shown = false end
 	function frame:SetShown(flag) self.shown = flag and true or false end
@@ -263,8 +299,19 @@ local function InterfaceFrame(name)
 	function frame:Disable() self.disabled = true end
 	function frame:SetScrollChild(child) self.scrollChild = child end
 	setmetatable(frame, { __index = function() return function() end end })
+	EVENT_FRAMES[#EVENT_FRAMES + 1] = frame
 	if name then _G[name] = frame end
 	return frame
+end
+
+-- Fires `event` at every frame that registered it, the way the client does: nothing else in
+-- this harness can raise MERCHANT_SHOW, MERCHANT_UPDATE or PLAYER_MONEY.
+local function Fire(event, ...)
+	for _, frame in ipairs(EVENT_FRAMES) do
+		if frame.registrations[event] and frame.scripts.OnEvent then
+			frame.scripts.OnEvent(frame, event, ...)
+		end
+	end
 end
 
 CreateFrame = function(kind, name, _, template)
@@ -401,6 +448,7 @@ local function Reset()
 	BestBiteDB, ns.db = nil, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
 	ns.Vendor.fallbackDone = false
+	wipe(ns.Vendor.pending)
 end
 
 local function Put(bagID, slot, itemID, count, locked)
@@ -1137,10 +1185,11 @@ ns.Vendor:Restock()
 Check("vendor: a full bag buys nothing", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
 Check("vendor: a full bag says nothing", #MESSAGES == 0, table.concat(MESSAGES, " / "))
 
--- Short money buys what it can and says how short it fell.
+-- Short money buys what it can and says how short it fell. The price is for a purchase of
+-- five, so 500 is 100 an item: 250c covers two.
 Reset()
 PLAYER.level = 60
-Stock(1, 9999, 100, 5, 20)
+Stock(1, 9999, 500, 5, 20)
 MERCHANT.money = 250
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
@@ -1206,6 +1255,134 @@ COMBAT = true
 ns.Vendor:Restock()
 COMBAT = false
 Check("vendor: nothing is bought in combat", #MERCHANT.bought == 0, tostring(#MERCHANT.bought))
+
+-- The client reports -1 for unlimited stock, which is what an innkeeper's food reads: a
+-- negative count is not sold out.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, -1)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: unlimited stock is bought, not read as sold out", #MERCHANT.bought == 1,
+	table.concat(MESSAGES, " / "))
+Check("vendor: and the target is met out of it", ns.Vendor:Count("food", 60) == 5,
+	tostring(ns.Vendor:Count("food", 60)))
+
+-- The price is what one purchase of the stack costs, so five items priced at 100 cost 100,
+-- and not the 500 that reading the price as one item's would report.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 100, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: a stack of five priced at 100 buys five items", ns.Vendor:Count("food", 60) == 5,
+	tostring(ns.Vendor:Count("food", 60)))
+Check("vendor: and the report is the true cost", Said("bought 5 Raid Food for 100c"),
+	table.concat(MESSAGES, " / "))
+Check("vendor: which is what left the purse", MERCHANT.money == 99900, tostring(MERCHANT.money))
+
+-- Money is counted per item as well: at 20c an item, 45c covers two items.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 100, 5, 20)
+MERCHANT.money = 45
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Vendor:Restock()
+Check("vendor: money buys as many items as it covers", ns.Vendor:Count("food", 60) == 2,
+	tostring(ns.Vendor:Count("food", 60)))
+Check("vendor: and the cost of those two is reported", Said("bought 2 Raid Food for 40c"),
+	table.concat(MESSAGES, " / "))
+Check("vendor: and what the money could not cover", Said("3 short"), table.concat(MESSAGES, " / "))
+
+-- More items than the merchant sells in one purchase arrive in several calls, each of them
+-- within the purchase limit: twelve at most, so ten at a time for a five-item stack.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 100, 12)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 25 } }
+ns.Vendor:Restock()
+local most, summed = 0, 0
+for _, purchase in ipairs(MERCHANT.bought) do
+	most = math.max(most, purchase.quantity)
+	summed = summed + purchase.quantity
+end
+Check("vendor: a purchase over the limit arrives in several calls", #MERCHANT.bought == 3,
+	tostring(#MERCHANT.bought))
+Check("vendor: and none of them is over the limit", most <= 12, tostring(most))
+Check("vendor: with every item asked for", summed == 25, tostring(summed))
+Check("vendor: all of them in the bags", ns.Vendor:Count("food", 60) == 25,
+	tostring(ns.Vendor:Count("food", 60)))
+
+-- A purchase is not in the bags at once. MERCHANT_UPDATE arrives with the old count, and the
+-- same shortfall must not be bought again; once it lands it is reported once and not bought.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+MERCHANT.hold = true
+Fire("MERCHANT_SHOW")
+Check("vendor: the visit buys the shortfall", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Fire("MERCHANT_UPDATE")
+Check("vendor: a purchase not landed is not bought again", #MERCHANT.bought == 1,
+	tostring(#MERCHANT.bought))
+Check("vendor: and is not reported before it lands", not Said("bought"), table.concat(MESSAGES, " / "))
+Land()
+Fire("MERCHANT_UPDATE")
+Check("vendor: once it lands it is not bought again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and it is reported once", (function()
+	local bought = 0
+	for _, message in ipairs(MESSAGES) do
+		if message:find("bought", 1, true) then bought = bought + 1 end
+	end
+	return bought == 1
+end)(), table.concat(MESSAGES, " / "))
+Check("vendor: the bags hold what was bought", ns.Vendor:Count("food", 60) == 5,
+	tostring(ns.Vendor:Count("food", 60)))
+
+-- Opening a merchant starts a new visit, which is what lets a weak item be bought once again;
+-- MERCHANT_UPDATE does not.
+Reset()
+PLAYER.level = 60
+Stock(1, 422, 50, 5, 20)   -- Dwarven Mild, level 15: outside the band
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+Fire("MERCHANT_SHOW")
+Check("vendor: a visit buys the weak item", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and the flag is set", ns.Vendor.fallbackDone == true)
+Fire("MERCHANT_UPDATE")
+Check("vendor: MERCHANT_UPDATE does not buy it again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+MERCHANT.stock = {}
+Fire("MERCHANT_SHOW")
+Check("vendor: MERCHANT_SHOW clears the one-fallback-a-visit flag", ns.Vendor.fallbackDone == false)
+Check("vendor: and a merchant with nothing to sell buys nothing", #MERCHANT.bought == 1,
+	tostring(#MERCHANT.bought))
+Stock(1, 422, 50, 5, 20)
+Fire("MERCHANT_SHOW")
+Check("vendor: so a new visit buys it again", #MERCHANT.bought == 2, tostring(#MERCHANT.bought))
+
+-- The window's counts are stale as soon as a purchase lands, and money changing is not a
+-- reason to leave them so.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+ns.Window:Open()
+Check("vendor: the status line starts from the empty bags",
+	ns.Window.vendorStatus:GetText() == "Food 0/5, water 0/5", ns.Window.vendorStatus:GetText())
+Fire("MERCHANT_SHOW")
+Check("vendor: and follows a purchase", ns.Window.vendorStatus:GetText() == "Food 5/5, water 0/5",
+	ns.Window.vendorStatus:GetText())
+Put(0, 9, 8770, 2)   -- Sparkling Spring Water, level 55: inside the band at 60
+Fire("PLAYER_MONEY")
+Check("vendor: a change of money refreshes the status line",
+	ns.Window.vendorStatus:GetText() == "Food 5/5, water 2/5", ns.Window.vendorStatus:GetText())
+Check("vendor: and money alone buys nothing", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
