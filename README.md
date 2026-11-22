@@ -46,7 +46,7 @@ Off until you switch it on, in the window. With it on, opening a vendor that sel
 - If the vendor sells nothing you can use yet, it buys nothing and says the food here needs a higher level.
 - It never restocks more than you are short of, than the vendor has, or than you can afford.
 - It stands aside when Polestar's Restock is set to keep food or water, so the two do not both buy.
-- What it restocked is said in the game's own tooltip over your character once the vendor window closes, not in chat.
+- What it restocked is said in the chat frame, in gold, silver and copper with the client's own coin icons: one line per kind restocked, and one line saying why nothing was bought when nothing was.
 
 ## Commands
 

@@ -82,157 +82,17 @@ local function Coins(amount)
 end
 Vendor.Coins = Coins
 
--- What a visit did is said above the character's head rather than in chat, where a busy
--- channel swallows it. A heading at most, one line per kind, and it goes away on its own.
-local NOTICE_LIFE = 5
-local NOTICE_MAX = 3       -- a heading and the two kinds, at most
-local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
--- Held back while a merchant is open: the shop window covers the character, so the notice is
--- shown once that window is closed rather than behind it.
-local noticeHeld = false
-
--- What the client offers for a chat bubble, for the diagnostic: the names and kinds of what its
--- bubble namespace exposes, and what each bubble template brings with it - region by region,
--- with its art, its name and the size the client sized it at.
-function Vendor:BubbleLines()
-	local lines = {}
-	local function Add(text) lines[#lines + 1] = text end
-	local function KeysOf(value)
-		local keys = {}
-		if type(value) ~= "table" then return keys end
-		for key, held in pairs(value) do keys[#keys + 1] = ("%s(%s)"):format(tostring(key), type(held)) end
-		table.sort(keys)
-		return keys
-	end
-	local bubbles = rawget(_G, "C_ChatBubbles")
-	Add("C_ChatBubbles: " .. type(bubbles))
-	local names = KeysOf(bubbles)
-	for index = 1, math.min(#names, 24) do Add("  " .. names[index]) end
-	if #names > 24 then Add(("  ... and %d more"):format(#names - 24)) end
-	for _, template in ipairs({ "ChatBubbleFrameTemplate", "ChatBubbleTemplate" }) do
-		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", nil, UIParent, template)
-		if not ok then
-			Add(template .. ": refused")
-		else
-			if frame.SetAlpha then frame:SetAlpha(0) end
-			if frame.Hide then frame:Hide() end
-			local regions = { frame.GetRegions and frame:GetRegions() }
-			Add(("%s: %d regions"):format(template, #regions))
-			for index, region in ipairs(regions) do
-				local parts = { index }
-				if type(region) == "table" then
-					local kind = "-"
-					if region.GetObjectType then
-						local fine, held = pcall(region.GetObjectType, region)
-						if fine and held then kind = tostring(held) end
-					end
-					parts[#parts + 1] = kind
-					if region.GetName then
-						local fine, held = pcall(region.GetName, region)
-						if fine and held then parts[#parts + 1] = tostring(held) end
-					end
-					if region.GetTexture then
-						local fine, held = pcall(region.GetTexture, region)
-						if fine and held then parts[#parts + 1] = tostring(held) end
-					end
-					if region.GetSize then
-						local fine, width, height = pcall(region.GetSize, region)
-						if fine and width then parts[#parts + 1] = ("%dx%d"):format(width or 0, height or 0) end
-					end
-				end
-				Add("  " .. table.concat(parts, " "))
-			end
-		end
-	end
-	return lines
-end
-
--- Shown in the client's own tooltip: the one piece of its chrome an addon can put on screen
--- that the client draws, skins and sizes itself, so it reads as native rather than as something
--- drawn here. This client has no chat bubble an addon can borrow - its bubble template brings
--- art but no working layout, which came out as a black box with the tail stretched across it.
-local function BuildTooltip()
-	local tip = CreateFrame("GameTooltip", "BestBiteNotice", UIParent, "GameTooltipTemplate")
-	tip:SetOwner(WorldFrame, "ANCHOR_NONE")
-	tip:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
-	tip:SetFrameStrata("HIGH")
-	tip:SetScript("OnUpdate", function(self)
-		if (GetTime and GetTime() or 0) >= noticeUntil then self:Hide() end
-	end)
-	tip.tooltip = true
-	return tip
-end
-
--- A notice line is dropped when the notice has been away long enough to be a new one. While
--- a merchant is open the notice is waiting to be shown, so its lines are kept.
-local function Reopen()
-	local now = GetTime and GetTime() or 0
-	if not noticeHeld and now >= noticeUntil then
-		noticeLines, noticeTitle = {}, false
-	end
-end
-
-function Vendor:NoticeText()
-	return noticeLines
-end
-
-function Vendor:ShowNotice()
-	if not notice then notice = BuildTooltip() end
-	notice:ClearLines()
-	notice:SetOwner(WorldFrame, "ANCHOR_NONE")
-	for index, text in ipairs(noticeLines) do
-		if index == 1 then notice:SetText(text, 1, 1, 1) else notice:AddLine(text, 1, 1, 1) end
-	end
-	if GetMerchantNumItems and GetMerchantNumItems() > 0 then
-		-- The shop window is over the character: hold the notice until it closes.
-		noticeHeld = true
-		return
-	end
-	noticeHeld = false
-	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
-	notice:Show()
-end
-
--- Shown when the merchant window closes, if a visit had something to say while it was open.
-function Vendor:FlushNotice()
-	if not noticeHeld then return end
-	noticeHeld = false
-	if not notice or #noticeLines == 0 then return end
-	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
-	notice:Show()
-end
-
--- One line, for whatever a visit has to say that is not a restock: why it bought nothing.
+-- What a visit did goes to the chat frame, which is how this client documents a message only
+-- the player can see: no frame is drawn here, so there is nothing to look unlike the client's
+-- own. One line per thing restocked, and one for why nothing was.
 function Vendor:Notice(text)
 	if not text or text == "" then return end
-	Reopen()
-	noticeLines[#noticeLines + 1] = text
-	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 1) end
-	self:ShowNotice()
+	BestBite:Print("restock: " .. text)
 end
 
--- A restock's own line. "Restocked" heads it once, however many items land, rather than
--- being repeated on every line.
 function Vendor:NoticeRestock(text)
 	if not text or text == "" then return end
-	Reopen()
-	if not noticeTitle then
-		noticeTitle = true
-		table.insert(noticeLines, 1, "Restocked")
-	end
-	noticeLines[#noticeLines + 1] = text
-	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 2) end
-	self:ShowNotice()
-end
-
--- A new visit starts with a clean notice, and so does a test.
-function Vendor:ClearNotice()
-	noticeLines, noticeTitle = {}, false
-	noticeUntil, noticeHeld = 0, false
-	if notice then
-		notice:ClearLines()
-		notice:Hide()
-	end
+	BestBite:Print("restocked " .. text)
 end
 
 -- Says what has landed of a purchase, once per landing and for what those items cost, and
@@ -647,7 +507,6 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("MERCHANT_SHOW")
 events:RegisterEvent("MERCHANT_UPDATE")
-events:RegisterEvent("MERCHANT_CLOSED")
 events:RegisterEvent("PLAYER_MONEY")
 events:SetScript("OnEvent", function(_, event)
 	-- Money changing is what the window's counts are drawn against, and no reason to buy.
@@ -655,13 +514,5 @@ events:SetScript("OnEvent", function(_, event)
 		Vendor:RefreshWindow()
 		return
 	end
-	-- Closing the merchant is when a visit's bubble is shown, since the window was over the
-	-- character while it bought.
-	if event == "MERCHANT_CLOSED" then
-		Vendor:FlushNotice()
-		return
-	end
-	-- Opening a merchant starts a new visit with a clean notice.
-	if event == "MERCHANT_SHOW" then Vendor:ClearNotice() end
 	Vendor:Request()
 end)

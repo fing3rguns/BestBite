@@ -363,23 +363,6 @@ local function Fire(event, ...)
 end
 
 CreateFrame = function(kind, name, _, template)
-	-- The notice's tooltip: the client skins and sizes it, so all the addon does is hand it
-	-- the lines.
-	if name == "BestBiteNotice" and (kind == "GameTooltip" or template == "GameTooltipTemplate") then
-		local tip = { shown = true, tooltip = true, setText = nil, addedLines = {} }
-		function tip:SetOwner() end
-		function tip:SetPoint() end
-		function tip:SetFrameStrata() end
-		function tip:SetBackdrop() self.drawn = true end
-		function tip:ClearLines() self.setText, self.addedLines = nil, {} end
-		function tip:SetText(text) self.setText = tostring(text or "") end
-		function tip:AddLine(text) self.addedLines[#self.addedLines + 1] = tostring(text or "") end
-		function tip:Show() self.shown = true end
-		function tip:Hide() self.shown = false end
-		function tip:SetScript(event, fn) self[event] = fn end
-		_G[name] = tip
-		return tip
-	end
 	if template == "SecureActionButtonTemplate" then
 		local button = { attributes = {}, shown = true, key = name }
 		function button:SetAttribute(key, value) self.attributes[key] = value end
@@ -516,7 +499,6 @@ local function Reset()
 	wipe(ns.Vendor.pending)
 	-- The notice above the character is a floating frame, so a line from the last check
 	-- would otherwise still be up in this one.
-	ns.Vendor:ClearNotice()
 end
 
 local function Put(bagID, slot, itemID, count, locked)
@@ -531,23 +513,20 @@ local function Said(text)
 	return false
 end
 
--- What the notice above the character's head is holding, shown or waiting to be shown: while
--- a merchant is open the notice is held back until that window closes. Read from what the
--- addon decided to say rather than from the frame, so it holds whatever frame it ended up on.
-local function Noticed(text)
-	for _, line in ipairs(ns.Vendor:NoticeText()) do
-		if line:find(text, 1, true) then return true end
+-- What the addon said about a restock, which goes to the chat frame.
+local function Noticed(text) return Said(text) end
+
+local function NoticeText() return table.concat(MESSAGES, " / ") end
+
+-- How many of its lines mention a word, which is how a restock that is said more than once is
+-- caught.
+local function NoticedTimes(text)
+	local count = 0
+	for _, message in ipairs(MESSAGES) do
+		local _, found = message:gsub(text, text)
+		count = count + found
 	end
-	return false
-end
-
-local function NoticeShown()
-	local frame = _G.BestBiteNotice
-	return frame ~= nil and rawget(frame, "shown") == true
-end
-
-local function NoticeText()
-	return table.concat(ns.Vendor:NoticeText(), " / ")
+	return count
 end
 
 -- /bb debug writes its report into the window now, not the chat frame.
@@ -1204,7 +1183,7 @@ Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 
 Check("vendor: water is bought up to the target", ns.Vendor:Count("water", 60) == 5,
 	tostring(ns.Vendor:Count("water", 60)))
 Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
-Check("vendor: and it said what it bought, above the character", Noticed("Raid Food for"), NoticeText())
+Check("vendor: and it said what it bought", Noticed("restocked 5 Raid Food for"), NoticeText())
 
 -- Part of a target is topped up, not a whole one.
 Reset()
@@ -1424,14 +1403,7 @@ Check("vendor: and nothing about the purchase goes to chat", not Said("Cherry Pi
 Land()
 Fire("MERCHANT_UPDATE")
 Check("vendor: once it lands it is not bought again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and it is reported once", (function()
-	local said = 0
-	for _, line in ipairs(ns.Vendor:NoticeText()) do
-		local _, count = line:gsub("for", "for")
-		said = said + count
-	end
-	return said == 1
-end)(), NoticeText())
+Check("vendor: and it is reported once", NoticedTimes("for") == 1, NoticeText())
 Check("vendor: the bags hold what was bought", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
 
@@ -1448,8 +1420,10 @@ Check("vendor: and the bags now hold the target", ns.Vendor:Count("food", 60) ==
 Fire("MERCHANT_UPDATE")
 Check("vendor: MERCHANT_UPDATE does not buy it again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 MERCHANT.stock = {}
+MESSAGES = {}
 Fire("MERCHANT_SHOW")
-Check("vendor: and a new visit clears the last one's notice", not Noticed("Restocked"), NoticeText())
+Check("vendor: and a new visit says nothing about the last one", NoticedTimes("restocked") == 0,
+	NoticeText())
 Check("vendor: and a merchant with nothing to sell buys nothing", #MERCHANT.bought == 1,
 	tostring(#MERCHANT.bought))
 Stock(1, 422, 50, 5, 20)
@@ -1636,38 +1610,18 @@ Check("vendor: gold and silver are broken out", ns.Vendor.Coins(77575):find("7|T
 	and ns.Vendor.Coins(77575):find("75|T", 1, true) ~= nil, ns.Vendor.Coins(77575))
 Check("vendor: no bare c suffix is left", not ns.Vendor.Coins(450):find("c$"), ns.Vendor.Coins(450))
 
--- /bb notice shows the notice with made-up numbers, so its look can be checked without a
--- vendor and without spending anything.
+-- /bb notice says what a restock would say, with made-up numbers, without a vendor and
+-- without spending anything.
 Reset()
 ns.db = nil
 BestBiteDB = { dev = true, vendor = { on = true, target = 5 } }
 slash("notice")
-Check("vendor: /bb notice raises the notice", Noticed("5 Homemade Cherry Pie"), NoticeText())
+Check("vendor: /bb notice says what a restock would say", Noticed("5 Homemade Cherry Pie"), NoticeText())
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
-Check("vendor: and Restocked is said once, as a heading",
-	(function()
-		local count = 0
-		for _, line in ipairs(ns.Vendor:NoticeText()) do
-			local _, found = line:gsub("Restocked", "Restocked")
-			count = count + found
-		end
-		return count == 1
-	end)(), NoticeText())
-Check("vendor: and the heading comes first", ns.Vendor:NoticeText()[1] == "Restocked",
-	table.concat(ns.Vendor:NoticeText(), " / "))
+Check("vendor: and each line says it was restocked", NoticedTimes("restocked ") == 2,
+	tostring(NoticedTimes("restocked ")))
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
--- The notice is the client's own tooltip, which the client draws and skins itself, rather
--- than a panel drawn here.
-Check("vendor: the notice is the client's own tooltip", rawget(_G.BestBiteNotice, "tooltip") == true,
-	tostring(rawget(_G.BestBiteNotice, "tooltip")))
-Check("vendor: and it holds one line per thing said", #ns.Vendor:NoticeText() == 3,
-	tostring(#ns.Vendor:NoticeText()))
-Check("vendor: and nothing about the notice is drawn by hand",
-	rawget(_G.BestBiteNotice, "backdrop") == nil and rawget(_G.BestBiteNotice, "drawn") == nil,
-	tostring(rawget(_G.BestBiteNotice, "backdrop")))
-Check("vendor: and the heading heads the tooltip", rawget(_G.BestBiteNotice, "setText") == "Restocked",
-	tostring(rawget(_G.BestBiteNotice, "setText")))
 
 -- The diagnostic commands are for working on the addon, not for playing it: with dev mode
 -- off a player cannot reach one, and the window does not offer the button.
@@ -1689,10 +1643,6 @@ Check("dev: and the button does nothing either", ns.Window.page ~= "debug", tost
 slash("dev")
 Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev commands: on"),
 	table.concat(MESSAGES, " / "))
-MESSAGES = {}
-slash("bubble")
-Check("dev: /bb bubble reports what the client offers for a bubble",
-	Said("C_ChatBubbles:") and Said("ChatBubbleTemplate"), table.concat(MESSAGES, " / "))
 Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
 	tostring(ns.Window.buttons.debug.shown))
 slash("dev")
@@ -1704,22 +1654,16 @@ ns.BestBite:Help()
 Check("dev: and the help does not name them", not Said("debug") and not Said("vendor")
 	and not Said("notice"), table.concat(MESSAGES, " / "))
 
--- The notice waits while the vendor window is open and shows once it closes.
+-- The restock is said as it happens, in the chat frame, and no frame is put on screen for it.
 Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 Fire("MERCHANT_SHOW")
-Check("vendor: the notice waits while the vendor is open",
-	Noticed("Raid Food for") and not NoticeShown(), NoticeText())
-Fire("MERCHANT_CLOSED")
-Check("vendor: and is shown once the vendor is closed", NoticeShown(), NoticeText())
-
--- Nothing the notice does is drawn here, whatever frame it ends up in.
-Check("vendor: the notice is not a drawn panel",
-	rawget(_G.BestBiteNotice, "backdrop") == nil and rawget(_G.BestBiteNotice, "drawn") == nil,
-	tostring(rawget(_G.BestBiteNotice, "drawn")))
+Check("vendor: the restock is said as it happens", Noticed("restocked"), NoticeText())
+Check("vendor: and nothing is put on screen for it", _G.BestBiteNotice == nil,
+	tostring(_G.BestBiteNotice))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
