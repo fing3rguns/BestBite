@@ -294,7 +294,10 @@ local TOOLTIP = {
 local EVENT_FRAMES = {}
 local function Region(parent)
 	local region = { parent = parent }
-	region.SetPoint = function() end
+	region.SetPoint = function(self, point, relativeTo, relativePoint, x, y)
+		self.point, self.relativePoint, self.x, self.y = point, relativePoint, x, y
+	end
+	region.ClearAllPoints = function(self) self.point = nil end
 	region.SetAllPoints = function() end
 	region.SetSize = function(self, width, height) self.width, self.height = width, height end
 	region.SetWidth = function(self, width) self.width = width end
@@ -363,6 +366,15 @@ local function Fire(event, ...)
 end
 
 CreateFrame = function(kind, name, _, template)
+	-- The client's chat bubble: a nine-slice frame with a font string of its own, which is what
+	-- a bubble looks like over a character that speaks.
+	if template == "ChatBubbleTemplate" then
+		local bubble = InterfaceFrame(name)
+		bubble.bubble = true
+		bubble.String = Region(bubble)
+		bubble.Tail = Region(bubble)
+		return bubble
+	end
 	if template == "SecureActionButtonTemplate" then
 		local button = { attributes = {}, shown = true, key = name }
 		function button:SetAttribute(key, value) self.attributes[key] = value end
@@ -425,20 +437,6 @@ GameTooltip = {
 	Hide = function() end,
 	SetItemByID = function() end,
 }
-
--- The client's own dialog, which a restock is said in: the addon registers a dialog of its own
--- and raises it with StaticPopup_Show, and the client draws, sizes and times it.
-OKAY = "Okay"
-StaticPopupDialogs = {}
-POPUPS = {}
-StaticPopup_Show = function(which, text)
-	local popup = { which = which, text = tostring(text or "") }
-	POPUPS[#POPUPS + 1] = popup
-	LAST_POPUP = popup
-	return popup
-end
-
-local function LastPopup() return LAST_POPUP end
 
 -- Action bar buttons, and the macros behind them.
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -510,7 +508,7 @@ local function Reset()
 	-- The harness works on the addon, so the dev commands are on unless a check says otherwise.
 	BestBiteDB, ns.db = { dev = true }, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
-	POPUPS, LAST_POPUP = {}, nil
+	ns.Vendor:ClearNotice()
 	wipe(ns.Vendor.pending)
 	-- The notice above the character is a floating frame, so a line from the last check
 	-- would otherwise still be up in this one.
@@ -528,35 +526,34 @@ local function Said(text)
 	return false
 end
 
--- What the addon said about a restock: in the client's dialog, or in chat where that dialog
--- could not be raised.
+-- What the bubble over the character is holding, shown or waiting to be shown: while a
+-- merchant is open it waits for that window to close. Read from what the addon decided to say
+-- as well as from the bubble, so a line is found whether it went up or is still waiting.
 local function Noticed(text)
-	for _, popup in ipairs(POPUPS) do
-		if popup.text:find(text, 1, true) then return true end
+	for _, line in ipairs(ns.Vendor:NoticeText()) do
+		if line:find(text, 1, true) then return true end
 	end
-	for _, message in ipairs(MESSAGES) do
-		if message:find(text, 1, true) then return true end
+	local bubble = _G.BestBiteNotice
+	if bubble and bubble.String then
+		return (bubble.String:GetText() or ""):find(text, 1, true) ~= nil
 	end
 	return false
 end
 
-local function NoticeText()
-	local parts = {}
-	for _, popup in ipairs(POPUPS) do parts[#parts + 1] = popup.text end
-	for _, message in ipairs(MESSAGES) do parts[#parts + 1] = message end
-	return table.concat(parts, " / ")
+local function NoticeShown()
+	local bubble = _G.BestBiteNotice
+	return bubble ~= nil and rawget(bubble, "shown") == true
 end
 
--- How many of its lines mention a word, which is how a restock that is said more than once is
--- caught.
+local function NoticeText() return table.concat(ns.Vendor:NoticeText(), " / ") end
+
+-- How many of its lines mention a word, which is how a restock said more than once is caught.
 local function NoticedTimes(text)
 	local count = 0
-	local function Count(body)
-		local _, found = body:gsub(text, text)
+	for _, line in ipairs(ns.Vendor:NoticeText()) do
+		local _, found = line:gsub(text, text)
 		count = count + found
 	end
-	for _, popup in ipairs(POPUPS) do Count(popup.text) end
-	for _, message in ipairs(MESSAGES) do Count(message) end
 	return count
 end
 
@@ -1214,7 +1211,7 @@ Check("vendor: food is bought up to the target", ns.Vendor:Count("food", 60) == 
 Check("vendor: water is bought up to the target", ns.Vendor:Count("water", 60) == 5,
 	tostring(ns.Vendor:Count("water", 60)))
 Check("vendor: the money was spent", MERCHANT.money < 100000, tostring(MERCHANT.money))
-Check("vendor: and it said what it bought", Noticed("Restocked 5 Raid Food for"), NoticeText())
+Check("vendor: and it said what it bought", Noticed("5 Raid Food for"), NoticeText())
 
 -- Part of a target is topped up, not a whole one.
 Reset()
@@ -1451,8 +1448,6 @@ Check("vendor: and the bags now hold the target", ns.Vendor:Count("food", 60) ==
 Fire("MERCHANT_UPDATE")
 Check("vendor: MERCHANT_UPDATE does not buy it again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 MERCHANT.stock = {}
-MESSAGES = {}
-POPUPS, LAST_POPUP = {}, nil
 Fire("MERCHANT_SHOW")
 Check("vendor: and a new visit says nothing about the last one", NoticedTimes("Restocked") == 0,
 	NoticeText())
@@ -1650,8 +1645,8 @@ BestBiteDB = { dev = true, vendor = { on = true, target = 5 } }
 slash("notice")
 Check("vendor: /bb notice says what a restock would say", Noticed("5 Homemade Cherry Pie"), NoticeText())
 Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeText())
-Check("vendor: and each line says it was restocked", NoticedTimes("Restocked ") == 2,
-	tostring(NoticedTimes("Restocked ")))
+Check("vendor: and Restocked heads it once", NoticedTimes("Restocked") == 1,
+	tostring(NoticedTimes("Restocked")))
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
 
@@ -1675,10 +1670,6 @@ Check("dev: and the button does nothing either", ns.Window.page ~= "debug", tost
 slash("dev")
 Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev commands: on"),
 	table.concat(MESSAGES, " / "))
-MESSAGES = {}
-slash("bubble")
-Check("dev: /bb bubble reports what a live bubble is made of", Said("bubble:"),
-	table.concat(MESSAGES, " / "))
 Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
 	tostring(ns.Window.buttons.debug.shown))
 slash("dev")
@@ -1690,19 +1681,26 @@ ns.BestBite:Help()
 Check("dev: and the help does not name them", not Said("debug") and not Said("vendor")
 	and not Said("notice"), table.concat(MESSAGES, " / "))
 
--- The restock is said in the client's own dialog, which the client draws, sizes and times.
+-- The bubble waits while the vendor window is open and goes up once it closes.
 Reset()
 PLAYER.level = 60
 Stock(1, 9999, 40, 5, 20)
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 Fire("MERCHANT_SHOW")
-Check("vendor: the restock is said in the client's own dialog", Noticed("Restocked"), NoticeText())
-Check("vendor: and the dialog is one of ours", LastPopup() and LastPopup().which == "BESTBITE_RESTOCK",
-	tostring(LastPopup() and LastPopup().which))
-Check("vendor: which takes itself away", (StaticPopupDialogs["BESTBITE_RESTOCK"] or {}).timeout > 0,
-	tostring((StaticPopupDialogs["BESTBITE_RESTOCK"] or {}).timeout))
-Check("vendor: and the visit's lines go into one dialog", #POPUPS == 1, tostring(#POPUPS))
+Check("vendor: the bubble waits while the vendor is open",
+	Noticed("Raid Food for") and not NoticeShown(), NoticeText())
+Fire("MERCHANT_CLOSED")
+Check("vendor: and goes up once the vendor is closed", NoticeShown(), NoticeText())
+Check("vendor: in the client's own chat bubble", rawget(_G.BestBiteNotice, "bubble") == true,
+	tostring(rawget(_G.BestBiteNotice, "bubble")))
+Check("vendor: whose tail hangs under it", _G.BestBiteNotice.Tail.point == "TOP"
+	and _G.BestBiteNotice.Tail.relativePoint == "BOTTOM",
+	tostring(_G.BestBiteNotice.Tail.point) .. "/" .. tostring(_G.BestBiteNotice.Tail.relativePoint))
+Check("vendor: holding the heading and the line",
+	(_G.BestBiteNotice.String:GetText() or ""):find("Restocked", 1, true) ~= nil
+	and (_G.BestBiteNotice.String:GetText() or ""):find("Raid Food", 1, true) ~= nil,
+	tostring(_G.BestBiteNotice.String:GetText()))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

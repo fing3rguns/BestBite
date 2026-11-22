@@ -82,130 +82,113 @@ local function Coins(amount)
 end
 Vendor.Coins = Coins
 
--- What a live chat bubble is made of, for the diagnostic: the client's own bubble over a unit
--- that has just spoken, region by region - its art, its size, its place and its texture
--- coordinates - which is the recipe a bubble drawn from the client's own pieces needs. Say
--- something in /say and run it in the same breath, while the bubble is still up.
-function Vendor:BubbleLines()
-	local lines = {}
-	local function Add(text) lines[#lines + 1] = text end
-	local function Show(value) return type(value) == "string" or type(value) == "number" end
-	local bubbles = rawget(_G, "C_ChatBubbles")
-	if type(bubbles) ~= "table" or type(bubbles.GetAllChatBubbles) ~= "function" then
-		Add("no C_ChatBubbles.GetAllChatBubbles")
-		return lines
-	end
-	local ok, all = pcall(bubbles.GetAllChatBubbles)
-	if not ok or type(all) ~= "table" then
-		Add("GetAllChatBubbles: " .. tostring(all))
-		return lines
-	end
-	Add(("%d bubble(s) up"):format(#all))
-	for index, frame in ipairs(all) do
-		if index > 2 then
-			Add("  ... more")
-			break
-		end
-		if type(frame) == "table" then
-			local width, height = "-", "-"
-			if frame.GetSize then
-				local fine, w, h = pcall(frame.GetSize, frame)
-				if fine then width, height = tostring(w), tostring(h) end
-			end
-			local name = "-"
-			if frame.GetName then
-				local fine, held = pcall(frame.GetName, frame)
-				if fine and Show(held) then name = tostring(held) end
-			end
-			Add(("%s %sx%s"):format(name, width, height))
-			local regions = { frame.GetRegions and frame:GetRegions() }
-			for regionIndex, region in ipairs(regions) do
-				local parts = {}
-				local kind = "-"
-				if region.GetObjectType then
-					local fine, held = pcall(region.GetObjectType, region)
-					if fine and Show(held) then kind = tostring(held) end
-				end
-				parts[#parts + 1] = ("  %d %s"):format(regionIndex, kind)
-				if region.GetTexture then
-					local fine, held = pcall(region.GetTexture, region)
-					if fine and Show(held) then parts[#parts + 1] = tostring(held) end
-				end
-				if region.GetSize then
-					local fine, w, h = pcall(region.GetSize, region)
-					if fine then parts[#parts + 1] = ("%dx%d"):format(w or 0, h or 0) end
-				end
-				if region.GetPoint then
-					local fine, point, _, relativePoint, x, y = pcall(region.GetPoint, region)
-					if fine and point then
-						parts[#parts + 1] = ("%s/%s %s,%s"):format(tostring(point),
-							tostring(relativePoint), tostring(x), tostring(y))
-					end
-				end
-				if region.GetTexCoord then
-					local fine, left, right, top, bottom = pcall(region.GetTexCoord, region)
-					if fine and left then
-						parts[#parts + 1] = ("tex %.2f %.2f %.2f %.2f"):format(left, right, top, bottom)
-					end
-				end
-				Add(table.concat(parts, " "))
-			end
-		end
-	end
-	return lines
-end
--- What a visit did is said in the client's own dialog: an entry of our own in
--- StaticPopupDialogs, raised with StaticPopup_Show, is how this client documents a message only
--- the player can see. The client draws, sizes and times the dialog itself, so nothing drawn here
--- can look unlike it. A visit's lines go into one dialog rather than one each.
-local POPUP = "BESTBITE_RESTOCK"
-local POPUP_LIFE = 12      -- seconds the dialog stays before it takes itself away
-local said, saidWaiting = {}, false
+-- What a visit did is said in the client's own chat bubble: ChatBubbleTemplate is the bubble the
+-- client draws over a character that speaks - a nine-slice frame with its own font string and
+-- tail, laid out by the client's ChatBubble layout - so a notice made from it reads as native and
+-- nothing is drawn here. Nothing is sent anywhere either: no one else sees it and no chat line is
+-- written, so this is a say bubble without the /say.
+local BUBBLE_WIDTH = 300    -- wider text wraps rather than running off the bubble
+local NOTICE_LIFE = 6       -- seconds the bubble stays up
+local NOTICE_MAX = 3        -- the heading and a line per kind, at most
+local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
+-- Held back while a merchant is open: the shop window is over the character, so the bubble is
+-- shown once it closes rather than behind it.
+local noticeHeld = false
 
-if StaticPopupDialogs then
-	StaticPopupDialogs[POPUP] = {
-		text = "%s",
-		button1 = OKAY,
-		timeout = POPUP_LIFE,
-		whileDead = true,
-		hideOnEscape = true,
-		preferredIndex = 3,
-	}
+local function BuildBubble()
+	local ok, bubble = pcall(CreateFrame, "Frame", "BestBiteNotice", UIParent, "ChatBubbleTemplate")
+	if not ok or type(bubble) ~= "table" or not bubble.String then return nil end
+	bubble:SetFrameStrata("HIGH")
+	bubble:SetFrameLevel(50)
+	bubble:SetClampedToScreen(true)
+	bubble.String:SetJustifyH("CENTER")
+	bubble.String:SetWidth(BUBBLE_WIDTH)
+	-- The tail comes with the template but not anchored, since the client places the tail of a
+	-- bubble it makes for a unit. Over the character's head it points down from the bubble.
+	if bubble.Tail then
+		bubble.Tail:ClearAllPoints()
+		bubble.Tail:SetPoint("TOP", bubble, "BOTTOM", -8, 6)
+	end
+	bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
+	bubble:SetScript("OnUpdate", function(self)
+		if (GetTime and GetTime() or 0) >= noticeUntil then self:Hide() end
+	end)
+	bubble.bubble = true
+	return bubble
 end
 
-local function ShowSaid()
-	saidWaiting = false
-	if #said == 0 then return end
-	local text = table.concat(said, "\n")
-	said = {}
-	if type(StaticPopup_Show) ~= "function" then
-		BestBite:Print(text)
+-- A line is dropped once the bubble has been away long enough to be a new one. While a merchant
+-- is open the bubble is waiting to be shown, so its lines are kept.
+local function Reopen()
+	local now = GetTime and GetTime() or 0
+	if not noticeHeld and now >= noticeUntil then
+		noticeLines, noticeTitle = {}, false
+	end
+end
+
+function Vendor:NoticeText()
+	return noticeLines
+end
+
+function Vendor:ShowNotice()
+	if not notice then notice = BuildBubble() end
+	if not notice then
+		-- A client with no bubble template to give still says what happened, in chat.
+		BestBite:Print(table.concat(noticeLines, " / "))
 		return
 	end
-	-- A dialog the player already closed, or one the client refuses, falls back to chat rather
-	-- than losing what the visit did.
-	if not pcall(StaticPopup_Show, POPUP, text) then BestBite:Print(text) end
-end
-
-local function Say(text)
-	if not text or text == "" then return end
-	said[#said + 1] = text
-	if saidWaiting then return end
-	saidWaiting = true
-	-- Waiting a moment lets one visit's purchases and its reasons go up together.
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.3, ShowSaid)
-	else
-		ShowSaid()
+	notice.String:SetWidth(BUBBLE_WIDTH)
+	notice.String:SetText(table.concat(noticeLines, "\n"))
+	if GetMerchantNumItems and GetMerchantNumItems() > 0 then
+		noticeHeld = true
+		notice:Hide()
+		return
 	end
+	noticeHeld = false
+	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
+	notice:Show()
 end
 
+-- Shown when the merchant window closes, if the visit had something to say while it was open.
+function Vendor:FlushNotice()
+	if not noticeHeld then return end
+	noticeHeld = false
+	if not notice or #noticeLines == 0 then return end
+	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
+	notice:Show()
+end
+
+-- One line, for whatever a visit has to say that is not a restock: why it bought nothing.
 function Vendor:Notice(text)
-	Say("Not restocked: " .. tostring(text))
+	if not text or text == "" then return end
+	Reopen()
+	noticeLines[#noticeLines + 1] = text
+	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 1) end
+	self:ShowNotice()
 end
 
+-- A restock's own line. "Restocked" heads the bubble once, however many items land, rather than
+-- being repeated on every line.
 function Vendor:NoticeRestock(text)
-	Say("Restocked " .. tostring(text))
+	if not text or text == "" then return end
+	Reopen()
+	if not noticeTitle then
+		noticeTitle = true
+		table.insert(noticeLines, 1, "Restocked")
+	end
+	noticeLines[#noticeLines + 1] = text
+	while #noticeLines > NOTICE_MAX do table.remove(noticeLines, 2) end
+	self:ShowNotice()
+end
+
+-- A new visit starts with a clean notice, and so does a test.
+function Vendor:ClearNotice()
+	noticeLines, noticeTitle = {}, false
+	noticeUntil, noticeHeld = 0, false
+	if notice then
+		notice.String:SetText("")
+		notice:Hide()
+	end
 end
 
 -- Says what has landed of a purchase, once per landing and for what those items cost, and
@@ -620,6 +603,7 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("MERCHANT_SHOW")
 events:RegisterEvent("MERCHANT_UPDATE")
+events:RegisterEvent("MERCHANT_CLOSED")
 events:RegisterEvent("PLAYER_MONEY")
 events:SetScript("OnEvent", function(_, event)
 	-- Money changing is what the window's counts are drawn against, and no reason to buy.
@@ -627,5 +611,13 @@ events:SetScript("OnEvent", function(_, event)
 		Vendor:RefreshWindow()
 		return
 	end
+	-- Closing the merchant is when the visit's bubble goes up: the window was over the character
+	-- while it bought.
+	if event == "MERCHANT_CLOSED" then
+		Vendor:FlushNotice()
+		return
+	end
+	-- Opening a merchant starts a new visit with a clean notice.
+	if event == "MERCHANT_SHOW" then Vendor:ClearNotice() end
 	Vendor:Request()
 end)
