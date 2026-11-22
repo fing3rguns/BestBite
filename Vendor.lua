@@ -82,17 +82,58 @@ local function Coins(amount)
 end
 Vendor.Coins = Coins
 
--- What a visit did goes to the chat frame, which is how this client documents a message only
--- the player can see: no frame is drawn here, so there is nothing to look unlike the client's
--- own. One line per thing restocked, and one for why nothing was.
-function Vendor:Notice(text)
+-- What a visit did is said in the client's own dialog: an entry of our own in
+-- StaticPopupDialogs, raised with StaticPopup_Show, is how this client documents a message only
+-- the player can see. The client draws, sizes and times the dialog itself, so nothing drawn here
+-- can look unlike it. A visit's lines go into one dialog rather than one each.
+local POPUP = "BESTBITE_RESTOCK"
+local POPUP_LIFE = 12      -- seconds the dialog stays before it takes itself away
+local said, saidWaiting = {}, false
+
+if StaticPopupDialogs then
+	StaticPopupDialogs[POPUP] = {
+		text = "%s",
+		button1 = OKAY,
+		timeout = POPUP_LIFE,
+		whileDead = true,
+		hideOnEscape = true,
+		preferredIndex = 3,
+	}
+end
+
+local function ShowSaid()
+	saidWaiting = false
+	if #said == 0 then return end
+	local text = table.concat(said, "\n")
+	said = {}
+	if type(StaticPopup_Show) ~= "function" then
+		BestBite:Print(text)
+		return
+	end
+	-- A dialog the player already closed, or one the client refuses, falls back to chat rather
+	-- than losing what the visit did.
+	if not pcall(StaticPopup_Show, POPUP, text) then BestBite:Print(text) end
+end
+
+local function Say(text)
 	if not text or text == "" then return end
-	BestBite:Print("restock: " .. text)
+	said[#said + 1] = text
+	if saidWaiting then return end
+	saidWaiting = true
+	-- Waiting a moment lets one visit's purchases and its reasons go up together.
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.3, ShowSaid)
+	else
+		ShowSaid()
+	end
+end
+
+function Vendor:Notice(text)
+	Say("Not restocked: " .. tostring(text))
 end
 
 function Vendor:NoticeRestock(text)
-	if not text or text == "" then return end
-	BestBite:Print("restocked " .. text)
+	Say("Restocked " .. tostring(text))
 end
 
 -- Says what has landed of a purchase, once per landing and for what those items cost, and

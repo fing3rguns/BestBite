@@ -3,7 +3,7 @@
 ## Unreleased
 
 - An item counts as stock, and may be restocked, whenever its own level requirement is one you already meet. The ten-level band that kept modest food and water out of the count is gone, so an innkeeper's food counts again.
-- What a visit did is said in the chat frame now, as `restocked <count> <item> for <coins>`, and a visit that buys nothing says why. It is no longer a frame drawn over your character: this client gives an addon no chat bubble to borrow, so every drawn version looked unlike the client's own.
+- What a visit did is said in the game's own dialog now, raised through `StaticPopup_Show` with a dialog of the addon's own: `Restocked <count> <item> for <coins>`, or a line saying why nothing was bought. It closes itself and only you see it. It is no longer a frame drawn over your character: this client gives an addon no chat bubble to borrow, so every drawn version looked unlike the client's own.
 
 ## 1.5.0
 
