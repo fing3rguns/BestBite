@@ -96,12 +96,32 @@ local noticeHeld = false
 -- client's own tooltip, which the client skins too, is what happens when there is no template.
 local BUBBLE_TEMPLATES = { "ChatBubbleFrameTemplate", "ChatBubbleTemplate" }
 
+-- A frame made from a bubble template paints nothing on its own: the art is only there if the
+-- template was really applied. A client that does not know the template hands back a plain
+-- scrolling message frame, so what it came with is what says whether it is a bubble at all.
+local function BubbleArt(frame)
+	local art = {}
+	if not (type(frame) == "table" and frame.GetRegions) then return art end
+	local ok, regions = pcall(function() return { frame:GetRegions() } end)
+	if not ok or type(regions) ~= "table" then return art end
+	for _, region in ipairs(regions) do
+		if type(region) == "table" and region.GetTexture then
+			local fine, path = pcall(region.GetTexture, region)
+			if fine and path then art[#art + 1] = tostring(path) end
+		end
+	end
+	return art
+end
+
 local function BuildBubble()
 	for _, template in ipairs(BUBBLE_TEMPLATES) do
 		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", "BestBiteNotice", UIParent, template)
-		if ok and type(frame) == "table" and frame.AddMessage and frame.Clear then
+		if ok and type(frame) == "table" and frame.AddMessage and frame.Clear
+			and #BubbleArt(frame) > 0 then
 			frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+			frame:SetSize(320, 64)
 			frame:SetFrameStrata("HIGH")
+			if frame.SetJustifyH then frame:SetJustifyH("CENTER") end
 			if frame.SetFading then frame:SetFading(true) end
 			if frame.SetTimeVisible then frame:SetTimeVisible(NOTICE_LIFE) end
 			if frame.SetMaxLines then frame:SetMaxLines(NOTICE_MAX) end
@@ -110,6 +130,37 @@ local function BuildBubble()
 		end
 	end
 	return nil
+end
+
+-- What the client offers for a chat bubble, for the diagnostic: whether each template is
+-- really there, what art comes with it, and whether a bubble manager addons could ask.
+function Vendor:BubbleLines()
+	local lines = {}
+	local function Add(text) lines[#lines + 1] = text end
+	for _, name in ipairs({ "ChatBubbleManager", "C_ChatBubbles", "ChatBubbleFrameTemplate",
+		"ChatBubbleTemplate" }) do
+		Add(name .. ": " .. type(rawget(_G, name)))
+	end
+	local manager = rawget(_G, "ChatBubbleManager")
+	if type(manager) == "table" then
+		local keys = {}
+		for key in pairs(manager) do keys[#keys + 1] = tostring(key) end
+		table.sort(keys)
+		Add("  manager: " .. table.concat(keys, ", "))
+	end
+	for _, template in ipairs(BUBBLE_TEMPLATES) do
+		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", nil, UIParent, template)
+		if not ok then
+			Add(template .. ": refused")
+		else
+			local art = BubbleArt(frame)
+			Add(("%s: made, %d regions%s"):format(template, #art,
+				#art > 0 and (", " .. table.concat(art, ", ")) or ""))
+			if frame.SetAlpha then frame:SetAlpha(0) end
+			if frame.Hide then frame:Hide() end
+		end
+	end
+	return lines
 end
 
 -- What is left when the client has no bubble to give: its tooltip, already skinned and sized

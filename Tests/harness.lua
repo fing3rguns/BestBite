@@ -363,13 +363,23 @@ local function Fire(event, ...)
 end
 
 CreateFrame = function(kind, name, _, template)
-	-- The client's chat bubble, for the notice: a scrolling message frame that holds the lines.
-	-- A client without the template at all refuses the frame, which is `BUBBLE_UNAVAILABLE`.
+	-- The client's chat bubble, for the notice: a scrolling message frame that holds the lines,
+	-- with the bubble's own art as its regions. A client that has no bubble template to give
+	-- either refuses the frame (`refused`) or ignores the name and hands back a plain frame
+	-- with no art at all (`ignored`), which is `BUBBLE_ANSWER`.
 	if template == "ChatBubbleFrameTemplate" or template == "ChatBubbleTemplate" then
-		if BUBBLE_UNAVAILABLE then error("Unsupported frame type: " .. tostring(template), 0) end
+		if BUBBLE_ANSWER == "refused" then
+			error("Unsupported frame type: " .. tostring(template), 0)
+		end
 		local bubble = InterfaceFrame(name)
 		bubble.bubble = true
 		bubble.lines = {}
+		if BUBBLE_ANSWER ~= "ignored" then
+			local function Art(path) return { GetTexture = function() return path end } end
+			bubble.regions = { Art("Interface\\Tooltips\\ChatBubble-Backdrop"),
+				Art("Interface\\Tooltips\\ChatBubble-TailLeft") }
+			function bubble:GetRegions() return unpack(self.regions) end
+		end
 		function bubble:Clear() self.lines = {} end
 		function bubble:AddMessage(text)
 			local value = tostring(text or "")
@@ -531,7 +541,7 @@ local function Reset()
 	-- The harness works on the addon, so the dev commands are on unless a check says otherwise.
 	BestBiteDB, ns.db = { dev = true }, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
-	BUBBLE_UNAVAILABLE = false
+	BUBBLE_ANSWER = "art"
 	wipe(ns.Vendor.pending)
 	-- The notice above the character is a floating frame, so a line from the last check
 	-- would otherwise still be up in this one.
@@ -1708,6 +1718,11 @@ Check("dev: and the button does nothing either", ns.Window.page ~= "debug", tost
 slash("dev")
 Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev commands: on"),
 	table.concat(MESSAGES, " / "))
+MESSAGES = {}
+slash("bubble")
+Check("dev: /bb bubble says what the client offers for a bubble",
+	Said("ChatBubbleManager") and Said("ChatBubbleFrameTemplate"), table.concat(MESSAGES, " / "))
+Check("dev: and what art the template brings", Said("regions"), table.concat(MESSAGES, " / "))
 Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
 	tostring(ns.Window.buttons.debug.shown))
 slash("dev")
@@ -1736,27 +1751,35 @@ Check("vendor: the notice is the client's chat bubble, not a drawn panel",
 	tostring(rawget(_G.BestBiteNotice, "bubble")))
 
 -- A client with no bubble template to give falls back to the client's own tooltip, which is
--- skinned by the client too: still nothing drawn here.
-Reset()
-BUBBLE_UNAVAILABLE = true
-ns.Vendor:ReleaseNotice()
-ns.Vendor:Notice("no food here it could buy")
-Check("vendor: a client with no bubble uses its own tooltip",
-	rawget(_G.BestBiteNotice, "tooltip") == true, tostring(rawget(_G.BestBiteNotice, "tooltip")))
-Check("vendor: and the tooltip holds what was said",
-	rawget(_G.BestBiteNotice, "setText") == "no food here it could buy",
-	tostring(rawget(_G.BestBiteNotice, "setText")))
-Check("vendor: and nothing is drawn by hand on it", rawget(_G.BestBiteNotice, "backdrop") == nil
-	and rawget(_G.BestBiteNotice, "drawn") == nil, tostring(rawget(_G.BestBiteNotice, "drawn")))
-ns.Vendor:NoticeRestock("5 Raid Food for 1")
-Check("vendor: a restock heads the tooltip and adds its line below",
-	rawget(_G.BestBiteNotice, "setText") == "Restocked"
-	and rawget(_G.BestBiteNotice, "addedLines")[1] == "no food here it could buy"
-	and rawget(_G.BestBiteNotice, "addedLines")[2] == "5 Raid Food for 1",
-	tostring(rawget(_G.BestBiteNotice, "setText")) .. " / "
-	.. table.concat(rawget(_G.BestBiteNotice, "addedLines"), " / "))
-Check("vendor: and the diagnostic names the tooltip", ns.Vendor:NoticeKind() == "tooltip",
-	tostring(ns.Vendor:NoticeKind()))
+-- skinned by the client too: still nothing drawn here. A client that refuses the template and
+-- one that silently ignores it both have to end up there.
+local BUBBLE_LABELS = { refused = "refuses the bubble template",
+	ignored = "silently ignores the bubble template" }
+
+local function NoticeFallsBackTo(answer)
+	Reset()
+	BUBBLE_ANSWER = answer
+	ns.Vendor:ReleaseNotice()
+	ns.Vendor:Notice("no food here it could buy")
+	Check("vendor: a client that " .. BUBBLE_LABELS[answer] .. " uses its own tooltip",
+		rawget(_G.BestBiteNotice, "tooltip") == true, tostring(rawget(_G.BestBiteNotice, "tooltip")))
+	Check("vendor: and the tooltip holds what was said",
+		rawget(_G.BestBiteNotice, "setText") == "no food here it could buy",
+		tostring(rawget(_G.BestBiteNotice, "setText")))
+	Check("vendor: and nothing is drawn by hand on it", rawget(_G.BestBiteNotice, "backdrop") == nil
+		and rawget(_G.BestBiteNotice, "drawn") == nil, tostring(rawget(_G.BestBiteNotice, "drawn")))
+	ns.Vendor:NoticeRestock("5 Raid Food for 1")
+	Check("vendor: a restock heads the tooltip and adds its line below",
+		rawget(_G.BestBiteNotice, "setText") == "Restocked"
+		and rawget(_G.BestBiteNotice, "addedLines")[1] == "no food here it could buy"
+		and rawget(_G.BestBiteNotice, "addedLines")[2] == "5 Raid Food for 1",
+		tostring(rawget(_G.BestBiteNotice, "setText")) .. " / "
+		.. table.concat(rawget(_G.BestBiteNotice, "addedLines"), " / "))
+	Check("vendor: and the diagnostic names the tooltip", ns.Vendor:NoticeKind() == "tooltip",
+		tostring(ns.Vendor:NoticeKind()))
+end
+NoticeFallsBackTo("refused")
+NoticeFallsBackTo("ignored")
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)
