@@ -301,6 +301,8 @@ local function Region(parent)
 	region.SetHeight = function(self, height) self.height = height end
 	region.SetColorTexture = function() end
 	region.SetTexture = function(self, texture) self.texture = texture end
+	region.SetVertexColor = function(self, r, g, b, a) self.vertex = { r, g, b, a } end
+	region.SetRotation = function(self, angle) self.rotation = angle end
 	region.SetFontObject = function() end
 	region.SetJustifyH = function() end
 	region.SetTextColor = function() end
@@ -328,11 +330,22 @@ local function InterfaceFrame(name)
 	function frame:Hide() self.shown = false end
 	function frame:SetShown(flag) self.shown = flag and true or false end
 	function frame:IsShown() return self.shown end
-	function frame:CreateTexture() return Region(self) end
+	function frame:CreateTexture()
+		local texture = Region(self)
+		-- rawget: an unknown key would otherwise answer with the catch-all function.
+		local kept = rawget(self, "textures")
+		if type(kept) ~= "table" then
+			kept = {}
+			rawset(self, "textures", kept)
+		end
+		kept[#kept + 1] = texture
+		return texture
+	end
 	function frame:CreateFontString() return Region(self) end
 	function frame:Enable() self.disabled = false end
 	function frame:Disable() self.disabled = true end
 	function frame:SetScrollChild(child) self.scrollChild = child end
+	function frame:SetBackdrop(backdrop) self.backdrop = backdrop end
 	setmetatable(frame, { __index = function() return function() end end })
 	EVENT_FRAMES[#EVENT_FRAMES + 1] = frame
 	if name then _G[name] = frame end
@@ -1682,6 +1695,11 @@ Check("vendor: the bubble waits while the vendor is open",
 	Noticed("Raid Food for") and not NoticeShown(), NoticeText())
 Fire("MERCHANT_CLOSED")
 Check("vendor: and is shown once the vendor is closed", NoticeShown(), NoticeText())
+
+Check("vendor: the bubble wears the game's chat-bubble edge",
+	_G.BestBiteNotice.backdrop ~= nil
+		and _G.BestBiteNotice.backdrop.edgeFile == "Interface\\Tooltips\\ChatBubble-Backdrop",
+	tostring(_G.BestBiteNotice.backdrop and _G.BestBiteNotice.backdrop.edgeFile))
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

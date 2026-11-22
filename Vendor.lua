@@ -89,6 +89,10 @@ local NOTICE_MAX = 3       -- a heading and the two kinds, at most
 local NOTICE_PAD = 16      -- room inside the bubble, between the text and its edge
 local NOTICE_GAP = 2       -- between the two lines
 local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
+-- The game's own chat-bubble outline, the one it draws over a character that speaks, with the
+-- tooltip's fill behind the text so the words stay readable.
+local NOTICE_EDGE = "Interface\\Tooltips\\ChatBubble-Backdrop"
+local NOTICE_FILL = "Interface\\Tooltips\\UI-Tooltip-Background"
 local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
 -- Held back while a merchant is open: the shop window covers the character, so the bubble is
 -- shown once that window is closed rather than behind it.
@@ -119,22 +123,23 @@ local function BuildNotice()
 	frame:SetSize(360, 76)
 	frame:SetFrameStrata("HIGH")
 	frame:SetFrameLevel(50)
-	-- A dark panel with the client's tooltip border, so the line stays readable over whatever
-	-- is behind it. Drawn here and never sent anywhere: no other player sees it.
+	-- The game's own chat-bubble outline around the tooltip's fill: the same art the client
+	-- draws over a character that speaks, so this looks like a bubble rather than a window.
+	-- Drawn here and never sent anywhere: no other player sees it.
 	if frame.SetBackdrop then
 		pcall(frame.SetBackdrop, frame, {
-			bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-			tile = true, tileSize = 16, edgeSize = 16,
-			insets = { left = 5, right = 5, top = 5, bottom = 5 },
+			bgFile = NOTICE_FILL,
+			edgeFile = NOTICE_EDGE,
+			tile = true, tileSize = 16, edgeSize = 32,
+			insets = { left = 14, right = 14, top = 14, bottom = 18 },
 		})
-		if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0.8) end
-		if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(1, 0.82, 0, 0.9) end
+		if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0.85) end
+		if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(0, 0, 0, 0.9) end
 	else
 		-- A client without backdrop support still gets a readable ground under the text.
 		local ground = frame:CreateTexture(nil, "BACKGROUND")
 		ground:SetAllPoints(frame)
-		ground:SetTexture(0, 0, 0, 0.8)
+		ground:SetTexture(0, 0, 0, 0.85)
 	end
 	frame.lines = {}
 	for index = 1, 3 do
