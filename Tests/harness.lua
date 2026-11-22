@@ -1685,6 +1685,8 @@ Check("vendor: and it holds one line per thing said", #ns.Vendor:NoticeText() ==
 Check("vendor: and nothing about the notice is drawn by hand",
 	rawget(_G.BestBiteNotice, "backdrop") == nil and rawget(_G.BestBiteNotice, "fontStrings") == nil,
 	tostring(rawget(_G.BestBiteNotice, "backdrop")))
+Check("vendor: and the diagnostic says what it is shown in", Said("client's chat bubble"),
+	table.concat(MESSAGES, " / "))
 
 -- The diagnostic commands are for working on the addon, not for playing it: with dev mode
 -- off a player cannot reach one, and the window does not offer the button.
@@ -1753,6 +1755,8 @@ Check("vendor: a restock heads the tooltip and adds its line below",
 	and rawget(_G.BestBiteNotice, "addedLines")[2] == "5 Raid Food for 1",
 	tostring(rawget(_G.BestBiteNotice, "setText")) .. " / "
 	.. table.concat(rawget(_G.BestBiteNotice, "addedLines"), " / "))
+Check("vendor: and the diagnostic names the tooltip", ns.Vendor:NoticeKind() == "tooltip",
+	tostring(ns.Vendor:NoticeKind()))
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)

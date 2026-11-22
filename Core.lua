@@ -464,6 +464,7 @@ local function RunCommand(message)
 		vendor:ClearNotice()
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Homemade Cherry Pie", vendor.Coins(36)))
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
+		BestBite:Print("notice: shown in the client's " .. (vendor:NoticeKind() or "nothing"))
 	elseif command == "debug" then
 		if not BestBite:Dev() then return end
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end

@@ -140,6 +140,13 @@ function Vendor:NoticeText()
 	return noticeLines
 end
 
+-- What the notice is shown in: the client's chat bubble where it has one to give, its tooltip
+-- otherwise. Worth saying out loud in the diagnostic, where which one it got matters.
+function Vendor:NoticeKind()
+	if not notice then return nil end
+	return notice.bubble and "chat bubble" or "tooltip"
+end
+
 function Vendor:ShowNotice()
 	if not notice then
 		notice = BuildBubble() or BuildTooltip()
