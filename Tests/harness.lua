@@ -363,6 +363,41 @@ local function Fire(event, ...)
 end
 
 CreateFrame = function(kind, name, _, template)
+	-- The client's chat bubble, for the notice: a scrolling message frame that holds the lines.
+	-- A client without the template at all refuses the frame, which is `BUBBLE_UNAVAILABLE`.
+	if template == "ChatBubbleFrameTemplate" or template == "ChatBubbleTemplate" then
+		if BUBBLE_UNAVAILABLE then error("Unsupported frame type: " .. tostring(template), 0) end
+		local bubble = InterfaceFrame(name)
+		bubble.bubble = true
+		bubble.lines = {}
+		function bubble:Clear() self.lines = {} end
+		function bubble:AddMessage(text)
+			local value = tostring(text or "")
+			self.lines[#self.lines + 1] = { GetText = function() return value end }
+		end
+		function bubble:SetTimeVisible() end
+		function bubble:SetFading() end
+		function bubble:SetMaxLines() end
+		function bubble:SetFontObject() end
+		return bubble
+	end
+	-- The notice's own tooltip, the fallback when there is no bubble: the client skins and
+	-- sizes it, so all the addon does is hand it the lines.
+	if name == "BestBiteNotice" and (kind == "GameTooltip" or template == "GameTooltipTemplate") then
+		local tip = { shown = true, tooltip = true, setText = nil, addedLines = {} }
+		function tip:SetOwner() end
+		function tip:SetPoint() end
+		function tip:SetFrameStrata() end
+		function tip:SetBackdrop() self.drawn = true end
+		function tip:ClearLines() self.setText, self.addedLines = nil, {} end
+		function tip:SetText(text) self.setText = tostring(text or "") end
+		function tip:AddLine(text) self.addedLines[#self.addedLines + 1] = tostring(text or "") end
+		function tip:Show() self.shown = true end
+		function tip:Hide() self.shown = false end
+		function tip:SetScript(event, fn) self[event] = fn end
+		_G[name] = tip
+		return tip
+	end
 	if template == "SecureActionButtonTemplate" then
 		local button = { attributes = {}, shown = true, key = name }
 		function button:SetAttribute(key, value) self.attributes[key] = value end
@@ -496,6 +531,7 @@ local function Reset()
 	-- The harness works on the addon, so the dev commands are on unless a check says otherwise.
 	BestBiteDB, ns.db = { dev = true }, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
+	BUBBLE_UNAVAILABLE = false
 	wipe(ns.Vendor.pending)
 	-- The notice above the character is a floating frame, so a line from the last check
 	-- would otherwise still be up in this one.
@@ -515,30 +551,22 @@ local function Said(text)
 end
 
 -- What the notice above the character's head is holding, shown or waiting to be shown: while
--- a merchant is open the bubble is held back until that window closes.
+-- a merchant is open the notice is held back until that window closes. Read from what the
+-- addon decided to say rather than from the frame, so it holds whatever frame it ended up on.
 local function Noticed(text)
-	local frame = _G.BestBiteNotice
-	if not (frame and frame.lines) then return false end
-	for _, line in ipairs(frame.lines) do
-		if (line:GetText() or ""):find(text, 1, true) then return true end
+	for _, line in ipairs(ns.Vendor:NoticeText()) do
+		if line:find(text, 1, true) then return true end
 	end
 	return false
 end
 
 local function NoticeShown()
 	local frame = _G.BestBiteNotice
-	return frame ~= nil and frame.shown == true
+	return frame ~= nil and rawget(frame, "shown") == true
 end
 
 local function NoticeText()
-	local frame = _G.BestBiteNotice
-	if not (frame and frame.lines) then return "" end
-	local parts = {}
-	for _, line in ipairs(frame.lines) do
-		local text = line:GetText() or ""
-		if text ~= "" then parts[#parts + 1] = text end
-	end
-	return table.concat(parts, " / ")
+	return table.concat(ns.Vendor:NoticeText(), " / ")
 end
 
 -- /bb debug writes its report into the window now, not the chat frame.
@@ -1416,13 +1444,12 @@ Land()
 Fire("MERCHANT_UPDATE")
 Check("vendor: once it lands it is not bought again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 Check("vendor: and it is reported once", (function()
-	local bought = 0
-	for _, line in ipairs(_G.BestBiteNotice and _G.BestBiteNotice.lines or {}) do
-		local text = line:GetText() or ""
-		local _, count = text:gsub("for", "for")
-		bought = bought + count
+	local said = 0
+	for _, line in ipairs(ns.Vendor:NoticeText()) do
+		local _, count = line:gsub("for", "for")
+		said = said + count
 	end
-	return bought == 1
+	return said == 1
 end)(), NoticeText())
 Check("vendor: the bags hold what was bought", ns.Vendor:Count("food", 60) == 5,
 	tostring(ns.Vendor:Count("food", 60)))
@@ -1639,19 +1666,25 @@ Check("vendor: and both lines are shown", Noticed("Morning Glory Dew"), NoticeTe
 Check("vendor: and Restocked is said once, as a heading",
 	(function()
 		local count = 0
-		for _, line in ipairs(_G.BestBiteNotice.lines or {}) do
-			local _, found = (line:GetText() or ""):gsub("Restocked", "Restocked")
+		for _, line in ipairs(ns.Vendor:NoticeText()) do
+			local _, found = line:gsub("Restocked", "Restocked")
 			count = count + found
 		end
 		return count == 1
 	end)(), NoticeText())
-Check("vendor: and the heading comes first", (_G.BestBiteNotice.lines[1]:GetText() or "") == "Restocked",
-	_G.BestBiteNotice.lines[1]:GetText())
+Check("vendor: and the heading comes first", ns.Vendor:NoticeText()[1] == "Restocked",
+	table.concat(ns.Vendor:NoticeText(), " / "))
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
-Check("vendor: and the bubble is sized to hold its lines",
-	(_G.BestBiteNotice.width or 0) > 300 and (_G.BestBiteNotice.height or 0) > 56,
-	tostring(_G.BestBiteNotice.width) .. "x" .. tostring(_G.BestBiteNotice.height))
+-- The notice is the client's own chat bubble when the client has one to give, which is what
+-- makes it look like the bubbles over a speaking character rather than a drawn panel.
+Check("vendor: the notice is the client's chat bubble", rawget(_G.BestBiteNotice, "bubble") == true,
+	tostring(rawget(_G.BestBiteNotice, "bubble")))
+Check("vendor: and it holds one line per thing said", #ns.Vendor:NoticeText() == 3,
+	tostring(#ns.Vendor:NoticeText()))
+Check("vendor: and nothing about the notice is drawn by hand",
+	rawget(_G.BestBiteNotice, "backdrop") == nil and rawget(_G.BestBiteNotice, "fontStrings") == nil,
+	tostring(rawget(_G.BestBiteNotice, "backdrop")))
 
 -- The diagnostic commands are for working on the addon, not for playing it: with dev mode
 -- off a player cannot reach one, and the window does not offer the button.
@@ -1696,11 +1729,30 @@ Check("vendor: the bubble waits while the vendor is open",
 Fire("MERCHANT_CLOSED")
 Check("vendor: and is shown once the vendor is closed", NoticeShown(), NoticeText())
 
-Check("vendor: the bubble wears the game's chat-bubble edge",
-	_G.BestBiteNotice.backdrop ~= nil
-		and _G.BestBiteNotice.backdrop.edgeFile == "Interface\\Tooltips\\ChatBubble-Backdrop",
-	tostring(_G.BestBiteNotice.backdrop and _G.BestBiteNotice.backdrop.edgeFile))
+Check("vendor: the notice is the client's chat bubble, not a drawn panel",
+	rawget(_G.BestBiteNotice, "bubble") == true and rawget(_G.BestBiteNotice, "backdrop") == nil,
+	tostring(rawget(_G.BestBiteNotice, "bubble")))
 
+-- A client with no bubble template to give falls back to the client's own tooltip, which is
+-- skinned by the client too: still nothing drawn here.
+Reset()
+BUBBLE_UNAVAILABLE = true
+ns.Vendor:ReleaseNotice()
+ns.Vendor:Notice("no food here it could buy")
+Check("vendor: a client with no bubble uses its own tooltip",
+	rawget(_G.BestBiteNotice, "tooltip") == true, tostring(rawget(_G.BestBiteNotice, "tooltip")))
+Check("vendor: and the tooltip holds what was said",
+	rawget(_G.BestBiteNotice, "setText") == "no food here it could buy",
+	tostring(rawget(_G.BestBiteNotice, "setText")))
+Check("vendor: and nothing is drawn by hand on it", rawget(_G.BestBiteNotice, "backdrop") == nil
+	and rawget(_G.BestBiteNotice, "drawn") == nil, tostring(rawget(_G.BestBiteNotice, "drawn")))
+ns.Vendor:NoticeRestock("5 Raid Food for 1")
+Check("vendor: a restock heads the tooltip and adds its line below",
+	rawget(_G.BestBiteNotice, "setText") == "Restocked"
+	and rawget(_G.BestBiteNotice, "addedLines")[1] == "no food here it could buy"
+	and rawget(_G.BestBiteNotice, "addedLines")[2] == "5 Raid Food for 1",
+	tostring(rawget(_G.BestBiteNotice, "setText")) .. " / "
+	.. table.concat(rawget(_G.BestBiteNotice, "addedLines"), " / "))
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then
 	error(("%d checks failed"):format(failures), 0)

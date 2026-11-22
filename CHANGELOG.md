@@ -3,8 +3,8 @@
 ## Unreleased
 
 - An item counts as stock, and may be restocked, whenever its own level requirement is one you already meet. The ten-level band that kept modest food and water out of the count is gone, so an innkeeper's food counts again.
-- The restock bubble is held while the vendor window is open and shown once you close it, instead of being hidden behind the shop.
-- The bubble wears the game's own chat-bubble outline now, with a readable fill behind the text, instead of a drawn panel and an arrow for a tail.
+- The restock notice is held while the vendor window is open and shown once you close it, instead of being hidden behind the shop.
+- The notice is the game's own chat bubble now, tail and all, and the client's own tooltip where the client has no bubble template to give  -  the drawn panel is gone.
 
 ## 1.5.0
 

@@ -83,102 +83,48 @@ end
 Vendor.Coins = Coins
 
 -- What a visit did is said above the character's head rather than in chat, where a busy
--- channel swallows it. Two lines at most, one per kind, and it goes away on its own.
+-- channel swallows it. A heading at most, one line per kind, and it goes away on its own.
 local NOTICE_LIFE = 5
 local NOTICE_MAX = 3       -- a heading and the two kinds, at most
-local NOTICE_PAD = 16      -- room inside the bubble, between the text and its edge
-local NOTICE_GAP = 2       -- between the two lines
-local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
--- The game's own chat-bubble outline, the one it draws over a character that speaks, with the
--- tooltip's fill behind the text so the words stay readable.
-local NOTICE_EDGE = "Interface\\Tooltips\\ChatBubble-Backdrop"
-local NOTICE_FILL = "Interface\\Tooltips\\UI-Tooltip-Background"
 local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
--- Held back while a merchant is open: the shop window covers the character, so the bubble is
+-- Held back while a merchant is open: the shop window covers the character, so the notice is
 -- shown once that window is closed rather than behind it.
 local noticeHeld = false
 
-local function LineHeight(line)
-	if line.GetStringHeight then
-		local ok, height = pcall(line.GetStringHeight, line)
-		if ok and height and height > 0 then return height end
-	end
-	return 18
-end
+-- The client's own chat bubble, if it will hand one over: the frame it draws over a character
+-- that speaks, tail and all. Hand-drawing that never matches it, so it is asked for first; the
+-- client's own tooltip, which the client skins too, is what happens when there is no template.
+local BUBBLE_TEMPLATES = { "ChatBubbleFrameTemplate", "ChatBubbleTemplate" }
 
-local function LineWidth(line)
-	if line.GetStringWidth then
-		local ok, width = pcall(line.GetStringWidth, line)
-		if ok and width then return width end
-	end
-	return 0
-end
-
-local function BuildNotice()
-	-- This client needs the backdrop mixin on a frame before it will draw one, which is the
-	-- same guard Polestar uses; without it SetBackdrop is there but paints nothing.
-	local frame = CreateFrame("Frame", "BestBiteNotice", UIParent,
-		BackdropTemplateMixin and "BackdropTemplate" or nil)
-	frame:SetPoint("CENTER", UIParent, "CENTER", 0, 132)
-	frame:SetSize(360, 76)
-	frame:SetFrameStrata("HIGH")
-	frame:SetFrameLevel(50)
-	-- The game's own chat-bubble outline around the tooltip's fill: the same art the client
-	-- draws over a character that speaks, so this looks like a bubble rather than a window.
-	-- Drawn here and never sent anywhere: no other player sees it.
-	if frame.SetBackdrop then
-		pcall(frame.SetBackdrop, frame, {
-			bgFile = NOTICE_FILL,
-			edgeFile = NOTICE_EDGE,
-			tile = true, tileSize = 16, edgeSize = 32,
-			insets = { left = 14, right = 14, top = 14, bottom = 18 },
-		})
-		if frame.SetBackdropColor then frame:SetBackdropColor(0, 0, 0, 0.85) end
-		if frame.SetBackdropBorderColor then frame:SetBackdropBorderColor(0, 0, 0, 0.9) end
-	else
-		-- A client without backdrop support still gets a readable ground under the text.
-		local ground = frame:CreateTexture(nil, "BACKGROUND")
-		ground:SetAllPoints(frame)
-		ground:SetTexture(0, 0, 0, 0.85)
-	end
-	frame.lines = {}
-	for index = 1, 3 do
-		local line = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-		line:SetJustifyH("CENTER")
-		line:SetTextColor(1, 1, 1)
-		line:SetText("")
-		if index == 1 then
-			line:SetPoint("TOP", frame, "TOP", 0, -NOTICE_PAD)
-		else
-			line:SetPoint("TOP", frame.lines[index - 1], "BOTTOM", 0, -NOTICE_GAP)
+local function BuildBubble()
+	for _, template in ipairs(BUBBLE_TEMPLATES) do
+		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", "BestBiteNotice", UIParent, template)
+		if ok and type(frame) == "table" and frame.AddMessage and frame.Clear then
+			frame:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+			frame:SetFrameStrata("HIGH")
+			if frame.SetFading then frame:SetFading(true) end
+			if frame.SetTimeVisible then frame:SetTimeVisible(NOTICE_LIFE) end
+			if frame.SetMaxLines then frame:SetMaxLines(NOTICE_MAX) end
+			frame.bubble = true
+			return frame
 		end
-		frame.lines[index] = line
 	end
-	frame:SetScript("OnUpdate", function(self)
-		if (GetTime() or 0) >= noticeUntil then self:Hide() end
+	return nil
+end
+
+-- What is left when the client has no bubble to give: its tooltip, already skinned and sized
+-- by the client, anchored over the character.
+local function BuildTooltip()
+	local tip = CreateFrame("GameTooltip", "BestBiteNotice", UIParent, "GameTooltipTemplate")
+	tip:SetOwner(WorldFrame, "ANCHOR_NONE")
+	tip:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+	tip:SetFrameStrata("HIGH")
+	-- The client's bubble fades itself; a tooltip has to be told when to go.
+	tip:SetScript("OnUpdate", function(self)
+		if (GetTime and GetTime() or 0) >= noticeUntil then self:Hide() end
 	end)
-	return frame
-end
-
--- Sizes the bubble to the text it holds, so the lines sit inside the art rather than over
--- its edges.
-local function FitNotice()
-	local shown, widest, tallest = {}, 0, 0
-	for _, line in ipairs(notice.lines) do
-		local text = line:GetText() or ""
-		if text ~= "" then
-			shown[#shown + 1] = line
-			widest = math.max(widest, LineWidth(line))
-		end
-	end
-	for _, line in ipairs(notice.lines) do
-		if LineWidth(line) > NOTICE_TEXT_MAX then line:SetWidth(NOTICE_TEXT_MAX) end
-	end
-	widest = math.min(widest, NOTICE_TEXT_MAX)
-	for _, line in ipairs(shown) do tallest = tallest + LineHeight(line) end
-	tallest = tallest + math.max(0, #shown - 1) * NOTICE_GAP
-
-	notice:SetSize(math.max(140, widest + NOTICE_PAD * 2 + 8), math.max(56, tallest + NOTICE_PAD * 2))
+	tip.tooltip = true
+	return tip
 end
 
 -- A notice line is dropped when the notice has been away long enough to be a new one. While
@@ -190,15 +136,26 @@ local function Reopen()
 	end
 end
 
+function Vendor:NoticeText()
+	return noticeLines
+end
+
 function Vendor:ShowNotice()
-	if not notice then notice = BuildNotice() end
-	for index, line in ipairs(notice.lines) do
-		line:SetWidth(0)
-		line:SetText(noticeLines[index] or "")
+	if not notice then
+		notice = BuildBubble() or BuildTooltip()
 	end
-	FitNotice()
+	if notice.bubble then
+		notice:Clear()
+		for _, text in ipairs(noticeLines) do notice:AddMessage(text, 1, 1, 1, 1) end
+	else
+		notice:ClearLines()
+		notice:SetOwner(WorldFrame, "ANCHOR_NONE")
+		for index, text in ipairs(noticeLines) do
+			if index == 1 then notice:SetText(text, 1, 1, 1) else notice:AddLine(text, 1, 1, 1) end
+		end
+	end
 	if GetMerchantNumItems and GetMerchantNumItems() > 0 then
-		-- The shop window is over the character: hold the bubble until it closes.
+		-- The shop window is over the character: hold the notice until it closes.
 		noticeHeld = true
 		return
 	end
@@ -244,9 +201,19 @@ function Vendor:ClearNotice()
 	noticeLines, noticeTitle = {}, false
 	noticeUntil, noticeHeld = 0, false
 	if notice then
-		for _, line in ipairs(notice.lines) do line:SetText("") end
+		if notice.bubble then
+			notice:Clear()
+		else
+			notice:ClearLines()
+		end
 		notice:Hide()
 	end
+end
+
+-- Throws the notice frame away, so the next line builds it again from scratch.
+function Vendor:ReleaseNotice()
+	self:ClearNotice()
+	notice = nil
 end
 
 -- Says what has landed of a purchase, once per landing and for what those items cost, and
