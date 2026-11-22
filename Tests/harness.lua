@@ -1680,6 +1680,10 @@ MESSAGES = {}
 ns.BestBite:Help()
 Check("dev: and the help does not name them", not Said("debug") and not Said("vendor")
 	and not Said("notice"), table.concat(MESSAGES, " / "))
+-- A command that has been taken out must not be left half-wired: calling it must not error.
+MESSAGES = {}
+slash("bubble")
+Check("dev: a command that is gone does not error", not Said("error"), table.concat(MESSAGES, " / "))
 
 -- The bubble waits while the vendor window is open and goes up once it closes.
 Reset()
