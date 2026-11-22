@@ -1649,6 +1649,8 @@ Check("vendor: and Restocked heads it once", NoticedTimes("Restocked") == 1,
 	tostring(NoticedTimes("Restocked")))
 Check("vendor: and it buys nothing", #MERCHANT.bought == 0 and MERCHANT.money == 100000,
 	tostring(#MERCHANT.bought) .. " / " .. tostring(MERCHANT.money))
+Check("vendor: and the diagnostic says what the notice is", Said("notice: bubble"),
+	table.concat(MESSAGES, " / "))
 
 -- The diagnostic commands are for working on the addon, not for playing it: with dev mode
 -- off a player cannot reach one, and the window does not offer the button.
