@@ -103,13 +103,14 @@ local function BuildBubble()
 	-- The template anchors the frame to its own string, so the string is what gets placed: a
 	-- point on the frame as well would leave it with anchors that cannot all hold.
 	bubble.String:SetWidth(BUBBLE_WIDTH)
+	bubble.String:SetJustifyH("CENTER")
+	bubble.String:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
 	-- The tail comes with the template but not anchored, since the client places the tail of a
 	-- bubble it makes for a unit. Over the character's head it points down from the bubble.
 	if bubble.Tail then
 		bubble.Tail:ClearAllPoints()
-		bubble.Tail:SetPoint("TOP", bubble, "BOTTOM", -8, 2)
+		bubble.Tail:SetPoint("TOP", bubble, "BOTTOM", -8, 6)
 	end
-	bubble.String:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
 	bubble:SetScript("OnUpdate", function(self)
 		if (GetTime and GetTime() or 0) >= noticeUntil then self:Hide() end
 	end)
@@ -134,15 +135,14 @@ end
 -- the wrong size looks exactly like one that was never built.
 function Vendor:NoticeState()
 	if not notice then return "not built" end
-	local function Round(value) return math.floor((tonumber(value) or 0) + 0.5) end
-	local width, height = 0, 0
+	local width, height = "-", "-"
 	if notice.GetSize then
 		local ok, gotWidth, gotHeight = pcall(notice.GetSize, notice)
-		if ok then width, height = Round(gotWidth), Round(gotHeight) end
+		if ok then width, height = tostring(gotWidth), tostring(gotHeight) end
 	end
 	local said = "no string"
 	if notice.String then said = "text [" .. tostring(notice.String:GetText()) .. "]" end
-	return ("%s %dx%d %s"):format(notice.bubble and "bubble" or "other", width, height, said)
+	return ("%s %sx%s %s"):format(notice.bubble and "bubble" or "other", width, height, said)
 end
 
 function Vendor:ShowNotice()
@@ -154,8 +154,6 @@ function Vendor:ShowNotice()
 	end
 	notice.String:SetWidth(BUBBLE_WIDTH)
 	notice.String:SetText(table.concat(noticeLines, "\n"))
-	-- Set after the text, since a bubble is re-laid out when its string changes size.
-	notice.String:SetJustifyH("CENTER")
 	if GetMerchantNumItems and GetMerchantNumItems() > 0 then
 		noticeHeld = true
 		notice:Hide()
