@@ -4,7 +4,7 @@
 
 - An item counts as stock, and may be restocked, whenever its own level requirement is one you already meet. The ten-level band that kept modest food and water out of the count is gone, so an innkeeper's food counts again.
 - The restock notice is held while the vendor window is open and shown once you close it, instead of being hidden behind the shop.
-- The notice is the game's own chat bubble now, tail and all, and the client's own tooltip where the client has no bubble template to give  -  the drawn panel is gone.
+- The notice is shown in the game's own tooltip now, instead of a panel drawn here. This client has no chat bubble an addon can borrow - its bubble template brings art but no working layout - so the client's tooltip, which it draws and skins itself, is what is used.
 
 ## 1.5.0
 
