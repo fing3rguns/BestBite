@@ -91,6 +91,49 @@ local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
 -- shown once that window is closed rather than behind it.
 local noticeHeld = false
 
+-- What the client offers for a chat bubble, for the diagnostic: whether it has a bubble manager
+-- an addon could ask, and what each bubble template brings with it - region by region, with the
+-- art and the size it came sized at, which is what a bubble drawn to look native needs.
+function Vendor:BubbleLines()
+	local lines = {}
+	local function Add(text) lines[#lines + 1] = text end
+	for _, name in ipairs({ "ChatBubbleManager", "C_ChatBubbles" }) do
+		Add(name .. ": " .. type(rawget(_G, name)))
+	end
+	local manager = rawget(_G, "ChatBubbleManager")
+	if type(manager) == "table" then
+		local keys = {}
+		for key in pairs(manager) do keys[#keys + 1] = tostring(key) end
+		table.sort(keys)
+		Add("manager: " .. table.concat(keys, ", "))
+	end
+	for _, template in ipairs({ "ChatBubbleFrameTemplate", "ChatBubbleTemplate" }) do
+		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", nil, UIParent, template)
+		if not ok then
+			Add(template .. ": refused")
+		else
+			if frame.SetAlpha then frame:SetAlpha(0) end
+			if frame.Hide then frame:Hide() end
+			local regions = { frame.GetRegions and frame:GetRegions() }
+			Add(("%s: %d regions"):format(template, #regions))
+			for index, region in ipairs(regions) do
+				local art = "-"
+				if type(region) == "table" and region.GetTexture then
+					local fine, path = pcall(region.GetTexture, region)
+					if fine and path then art = tostring(path) end
+				end
+				local size = ""
+				if type(region) == "table" and region.GetSize then
+					local fine, width, height = pcall(region.GetSize, region)
+					if fine and width then size = (" %dx%d"):format(width or 0, height or 0) end
+				end
+				Add(("  %d %s %s%s"):format(index, type(region), art, size))
+			end
+		end
+	end
+	return lines
+end
+
 -- Shown in the client's own tooltip: the one piece of its chrome an addon can put on screen
 -- that the client draws, skins and sizes itself, so it reads as native rather than as something
 -- drawn here. This client has no chat bubble an addon can borrow - its bubble template brings

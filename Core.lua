@@ -464,6 +464,10 @@ local function RunCommand(message)
 		vendor:ClearNotice()
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Homemade Cherry Pie", vendor.Coins(36)))
 		vendor:NoticeRestock(("%d %s for %s"):format(5, "Morning Glory Dew", vendor.Coins(36)))
+	elseif command == "bubble" then
+		if not BestBite:Dev() then return end
+		local lines = ns.Vendor and ns.Vendor:BubbleLines() or { "Vendor.lua did not load" }
+		for _, line in ipairs(lines) do BestBite:Print("bubble: " .. line) end
 	elseif command == "debug" then
 		if not BestBite:Dev() then return end
 		if not (ns.Window and ns.Window:ShowDebug()) then BestBite:Debug() end
