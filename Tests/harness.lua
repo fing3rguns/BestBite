@@ -66,7 +66,7 @@ local PLAYER = { level = 60, health = 500, healthMax = 1000, mana = 500, manaMax
 local COMBAT = false
 
 ---------------------------------------------------------------------------- merchant
--- Two items the vendor tests need: one inside a level 40 band, one with no requirement.
+-- Two items the vendor tests need: one needing level 35, one with no requirement.
 Item(9997, { name = "Trail Stew", class = 0, sub = 5, ilvl = 40, req = 35, lines = {
 	"Trail Stew", "Use: Restores 400 health over 20 sec. Must remain seated while eating." } })
 Item(5350, { name = "Conjured Bread", class = 0, sub = 5, ilvl = 5, req = 0, lines = {
@@ -483,7 +483,6 @@ local function Reset()
 	-- The harness works on the addon, so the dev commands are on unless a check says otherwise.
 	BestBiteDB, ns.db = { dev = true }, nil
 	MERCHANT = { stock = {}, money = 100000, bought = {} }
-	ns.Vendor.fallbackDone = {}
 	wipe(ns.Vendor.pending)
 	-- The notice above the character is a floating frame, so a line from the last check
 	-- would otherwise still be up in this one.
@@ -502,14 +501,20 @@ local function Said(text)
 	return false
 end
 
--- What the notice above the character's head is showing, if it is up at all.
+-- What the notice above the character's head is holding, shown or waiting to be shown: while
+-- a merchant is open the bubble is held back until that window closes.
 local function Noticed(text)
 	local frame = _G.BestBiteNotice
-	if not (frame and frame.lines and frame.shown) then return false end
+	if not (frame and frame.lines) then return false end
 	for _, line in ipairs(frame.lines) do
 		if (line:GetText() or ""):find(text, 1, true) then return true end
 	end
 	return false
+end
+
+local function NoticeShown()
+	local frame = _G.BestBiteNotice
+	return frame ~= nil and frame.shown == true
 end
 
 local function NoticeText()
@@ -1141,23 +1146,23 @@ Check("vendor: Polestar with food amounts stands BestBite down", standDown2 == t
 Check("vendor: and says which addon is doing it", tostring(why2):find("Polestar", 1, true) ~= nil, tostring(why2))
 Polestar = nil
 
--- Only items good for your level count towards the target: at level 40, the band starts
--- at 30, so a level 35 food counts, a level 15 one is too weak and a level 60 one unusable.
+-- Anything this character can use counts towards the target, whatever level it is: at level 40
+-- a level 15 food counts, a level 35 one counts, a level 60 one is not usable yet.
 Reset()
 PLAYER.level = 40
-Check("vendor: a level 15 food is too weak to count", ns.Vendor:LevelAppropriate(422, 40) == false)
-Check("vendor: a level 60 food is not usable yet", ns.Vendor:LevelAppropriate(9999, 40) == false)
-Check("vendor: a level 35 food counts", ns.Vendor:LevelAppropriate(9997, 40) == true)
+Check("vendor: food below your level counts", ns.Vendor:LevelAppropriate(422, 40) == true)
+Check("vendor: food above your level does not count", ns.Vendor:LevelAppropriate(9999, 40) == false)
+Check("vendor: food at your level counts", ns.Vendor:LevelAppropriate(9997, 40) == true)
 Check("vendor: an item with no level requirement counts", ns.Vendor:LevelAppropriate(5350, 40) == true)
 
--- Twenty weak items do not satisfy the target.
+-- Everything usable is stock, so a bag of modest food satisfies the target.
 Reset()
 PLAYER.level = 60
 Put(0, 1, 422, 20)
 Put(0, 2, 9999, 2)
 local shortfall, have = ns.Vendor:Shortfall("food")
-Check("vendor: weak food does not count towards the target", have == 2, tostring(have))
-Check("vendor: so the shortfall is measured against the good food", shortfall == 3, tostring(shortfall))
+Check("vendor: food below your level counts towards the target", have == 22, tostring(have))
+Check("vendor: so there is nothing short for it", shortfall == 0, tostring(shortfall))
 
 -- The switch and the target come from the saved settings.
 Reset()
@@ -1258,31 +1263,31 @@ ns.Vendor:Restock()
 Check("vendor: short money buys what it can", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 Check("vendor: and says it fell short", Noticed("short"), NoticeText())
 
--- Nothing good for the level is sold: the best usable one is bought as a fallback.
+-- A vendor selling only modest food is restocked the same way: anything usable is stock.
 Reset()
 PLAYER.level = 60
-Stock(1, 422, 10, 5, 20)   -- Dwarven Mild, level 15: outside the band
+Stock(1, 422, 10, 5, 20)   -- Dwarven Mild, level 15: below your level, still usable
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
-Check("vendor: a fallback is bought when nothing is in band", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and the bubble says nothing about the level", not Noticed("below your level"), NoticeText())
+Check("vendor: a vendor selling only modest food is restocked", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and nothing is said about the level", not Noticed("higher level"), NoticeText())
 
--- A weak item never outranks one of the band on the same vendor.
+-- With both usable, the ordering the buttons use decides between them: buff food comes first.
 Reset()
 PLAYER.level = 60
-Stock(1, 9999, 40, 5, 20)   -- Raid Food, level 60: in the band
-Stock(2, 2001, 10, 5, 20)   -- Buff Rations, level 1: outside it, but buffs
+Stock(1, 9999, 40, 5, 20)   -- Raid Food, level 60: the biggest restore
+Stock(2, 2001, 10, 5, 20)   -- Buff Rations, level 1: buff food
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
-Check("vendor: an item of the band wins over a weak one",
-	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 9999,
+Check("vendor: the ranking picks between two usable items",
+	MERCHANT.bought[1] ~= nil and MERCHANT.bought[1].itemID == 2001,
 	MERCHANT.bought[1] and tostring(MERCHANT.bought[1].itemID))
-Check("vendor: and nothing is said to be below the level", not Said("below your level"),
-	table.concat(MESSAGES, " / "))
+Check("vendor: and nothing is said about the level either", not Noticed("higher level"), NoticeText())
 
--- MERCHANT_UPDATE re-runs the pass after every purchase: one fallback a visit is enough.
+-- MERCHANT_UPDATE re-runs the pass after every purchase; the bags now hold the target, so
+-- a second pass buys nothing.
 Reset()
 PLAYER.level = 60
 Stock(1, 422, 10, 5, 20)
@@ -1290,9 +1295,9 @@ ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 ns.Vendor:Restock()
-Check("vendor: a fallback is bought once a visit", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: a second pass buys nothing once the target is met", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 ns.Vendor:Restock(true)
-Check("vendor: a Buy now press buys the fallback again", #MERCHANT.bought == 2, tostring(#MERCHANT.bought))
+Check("vendor: and Buy now buys nothing either", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 
 -- Polestar handling it means BestBite does not buy.
 Reset()
@@ -1413,30 +1418,30 @@ Check("vendor: the bags hold what was bought", ns.Vendor:Count("food", 60) == 5,
 -- MERCHANT_UPDATE does not.
 Reset()
 PLAYER.level = 60
-Stock(1, 422, 50, 5, 20)   -- Dwarven Mild, level 15: outside the band
+Stock(1, 422, 50, 5, 20)   -- Dwarven Mild, level 15: usable, so it counts
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 Fire("MERCHANT_SHOW")
-Check("vendor: a visit buys the weak item", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and the flag is set", ns.Vendor.fallbackDone.food == true)
+Check("vendor: a visit buys the food it can use", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
+Check("vendor: and the bags now hold the target", ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
 Fire("MERCHANT_UPDATE")
 Check("vendor: MERCHANT_UPDATE does not buy it again", #MERCHANT.bought == 1, tostring(#MERCHANT.bought))
 MERCHANT.stock = {}
 Fire("MERCHANT_SHOW")
-Check("vendor: MERCHANT_SHOW clears the one-fallback-a-visit flag", ns.Vendor.fallbackDone.food == nil)
+Check("vendor: and a new visit clears the last one's notice", not Noticed("Restocked"), NoticeText())
 Check("vendor: and a merchant with nothing to sell buys nothing", #MERCHANT.bought == 1,
 	tostring(#MERCHANT.bought))
 Stock(1, 422, 50, 5, 20)
 Fire("MERCHANT_SHOW")
-Check("vendor: a new visit does not buy another weak stack beside the one carried",
+Check("vendor: a new visit buys nothing while the bags hold the target",
 	#MERCHANT.bought == 1, tostring(#MERCHANT.bought))
-Check("vendor: and says the carried food is below the level", Noticed("below your level"),
+Check("vendor: and says nothing about the level",  not Noticed("below your level"),
 	table.concat(MESSAGES, " / "))
 MERCHANT.bought = {}
-Check("vendor: a Buy now press buys the weak item again anyway",
+Check("vendor: and Buy now with the target met buys nothing",
 	(function()
 		ns.Vendor:Restock(true)
-		return #MERCHANT.bought == 1
+		return #MERCHANT.bought == 0
 	end)(), tostring(#MERCHANT.bought))
 
 -- The window's counts are stale as soon as a purchase lands, and money changing is not a
@@ -1452,7 +1457,7 @@ Check("vendor: the status line starts from the empty bags",
 Fire("MERCHANT_SHOW")
 Check("vendor: and follows a purchase", ns.Window.vendorStatus:GetText() == "Food 5/5, water 0/5",
 	ns.Window.vendorStatus:GetText())
-Put(0, 9, 8770, 2)   -- Sparkling Spring Water, level 55: inside the band at 60
+Put(0, 9, 8770, 2)   -- Sparkling Spring Water, level 55: usable at 60
 Fire("PLAYER_MONEY")
 Check("vendor: a change of money refreshes the status line",
 	ns.Window.vendorStatus:GetText() == "Food 5/5, water 2/5", ns.Window.vendorStatus:GetText())
@@ -1575,23 +1580,23 @@ ns.Vendor:Restock()
 Check("vendor: the client's own item table is read when the tuple is missing",
 	ns.Vendor:Count("food", 60) == 5, tostring(ns.Vendor:Count("food", 60)))
 
--- The innkeeper as a level 24 sees him: every food and drink he sells is below the band, and
--- both kinds are still bought once, which is "there is clearly food and water to be bought".
+-- The innkeeper as a level 24 sees him: every food and drink he sells is usable, so both kinds
+-- are restocked to the target at once.
 Reset()
 PLAYER.level = 24
-Stock(1, 2003, 23, 5, -1)   -- Plain Loaf, level 1: below the band at 24
+Stock(1, 2003, 23, 5, -1)   -- Plain Loaf, level 1: usable at 24
 Stock(2, 159, 23, 5, -1)    -- Refreshing Spring Water, level 1
 ns.db = nil
 BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 local boughtKinds = {}
 for _, buy in ipairs(MERCHANT.bought) do boughtKinds[buy.itemID] = true end
-Check("vendor: food and water below the band are both bought", boughtKinds[2003] and boughtKinds[159],
+Check("vendor: food and water are both restocked", boughtKinds[2003] and boughtKinds[159],
 	table.concat(MESSAGES, " / "))
 Check("vendor: and neither line mentions the level", not Noticed("below your level"),
 	table.concat(MESSAGES, " / "))
 
--- An item needing a higher level is not a fallback: it cannot be used at all.
+-- An item needing a higher level cannot be used at all, so it is not bought and is said so.
 Reset()
 PLAYER.level = 24
 Stock(1, 9999, 40, 5, -1)   -- Raid Food, needs level 60
@@ -1600,7 +1605,7 @@ BestBiteDB = { vendor = { on = true, target = 5 } }
 ns.Vendor:Restock()
 Check("vendor: an item needing a higher level is never bought", #MERCHANT.bought == 0,
 	tostring(#MERCHANT.bought))
-Check("vendor: and the vendor reads as having nothing to buy", Noticed("no food here it could buy"),
+Check("vendor: and the bubble says the food here needs a higher level", Noticed("needs a higher level"),
 	table.concat(MESSAGES, " / "))
 
 -- Money reads as gold, silver and copper with the client's own coin icons, not as "450c".
@@ -1665,6 +1670,18 @@ MESSAGES = {}
 ns.BestBite:Help()
 Check("dev: and the help does not name them", not Said("debug") and not Said("vendor")
 	and not Said("notice"), table.concat(MESSAGES, " / "))
+
+-- The bubble waits while the vendor window is open and shows once it closes.
+Reset()
+PLAYER.level = 60
+Stock(1, 9999, 40, 5, 20)
+ns.db = nil
+BestBiteDB = { vendor = { on = true, target = 5 } }
+Fire("MERCHANT_SHOW")
+Check("vendor: the bubble waits while the vendor is open",
+	Noticed("Raid Food for") and not NoticeShown(), NoticeText())
+Fire("MERCHANT_CLOSED")
+Check("vendor: and is shown once the vendor is closed", NoticeShown(), NoticeText())
 
 print(string.format("\n%d checks, %d failures", total, failures))
 if failures > 0 then

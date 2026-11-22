@@ -42,11 +42,11 @@ No dependencies.
 
 Off until you switch it on, in the window. With it on, opening a vendor that sells food or water tops your bags up to the amount you set for each ("Keep 5 of each" by default), buying the item BestBite would have used itself. When a merchant is open, the window shows what you carry against that target, and `Buy now` buys on demand.
 
-- Only items good for your level count as stock, and only those are bought: a stack of low-level water will not convince it that you are stocked.
-- If the vendor sells nothing good for your level, it restocks the best it has rather than nothing — once per visit, and only if you carry none of that kind already.
+- Anything you can use counts as stock, and only those items are bought: a food whose level requirement you already meet counts, whatever level it is.
+- If the vendor sells nothing you can use yet, it buys nothing and says the food here needs a higher level.
 - It never restocks more than you are short of, than the vendor has, or than you can afford.
 - It stands aside when Polestar's Restock is set to keep food or water, so the two do not both buy.
-- What it restocked is said in a bubble over your character, not in chat.
+- What it restocked is said in a bubble over your character once the vendor window closes, not in chat.
 
 ## Commands
 

@@ -1,11 +1,10 @@
--- Restocking at vendors: when a merchant is open and the bags are short of food or water,
--- buy level-appropriate items to a target, choosing them with the same ordering the two
+-- Restocking at vendors: when a merchant is open and the bags are short of food or water, buy
+-- items this character can use to a target, choosing them with the same ordering the two
 -- buttons use. Off unless switched on (Window.lua), and silent whenever Polestar's own
 -- Restock is configured for food or water, since it would buy on top of ours.
 --
--- Items good for your level are the ones that count and the ones bought: an item whose own
--- level requirement is more than BAND below yours is left out of the count, so a bag of
--- weak leftovers cannot pass as stock.
+-- An item counts as stock, and is the only kind bought, when its own level requirement is one
+-- this character already meets: anything you could use right now.
 
 local ADDON, ns = ...
 
@@ -17,16 +16,10 @@ local Consume = ns.Consume
 local Vendor = {}
 ns.Vendor = Vendor
 
--- Levels below yours that still count as good for you, and the target's range.
-Vendor.BAND = 10
+-- The target's range.
 Vendor.TARGET_MIN = 5
 Vendor.TARGET_MAX = 100
 Vendor.TARGET_STEP = 5
-
--- Set once a weak item has been bought this visit, per kind, so MERCHANT_UPDATE cannot buy
--- it again. Per kind rather than once for the visit: a vendor whose food and water are both
--- below the level still owes you one attempt at each.
-Vendor.fallbackDone = {}
 
 -- A purchase is taken by the client at once but put in the bags a moment later, so what has
 -- been bought and not yet landed is remembered per item; MERCHANT_UPDATE re-reads the bags,
@@ -97,6 +90,9 @@ local NOTICE_PAD = 16      -- room inside the bubble, between the text and its e
 local NOTICE_GAP = 2       -- between the two lines
 local NOTICE_TEXT_MAX = 560 -- wider text wraps rather than spilling out of the bubble
 local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
+-- Held back while a merchant is open: the shop window covers the character, so the bubble is
+-- shown once that window is closed rather than behind it.
+local noticeHeld = false
 
 local function LineHeight(line)
 	if line.GetStringHeight then
@@ -180,10 +176,11 @@ local function FitNotice()
 	notice:SetSize(math.max(140, widest + NOTICE_PAD * 2 + 8), math.max(56, tallest + NOTICE_PAD * 2))
 end
 
--- A notice line is dropped when the notice has been away long enough to be a new one.
+-- A notice line is dropped when the notice has been away long enough to be a new one. While
+-- a merchant is open the notice is waiting to be shown, so its lines are kept.
 local function Reopen()
 	local now = GetTime and GetTime() or 0
-	if now >= noticeUntil then
+	if not noticeHeld and now >= noticeUntil then
 		noticeLines, noticeTitle = {}, false
 	end
 end
@@ -195,6 +192,21 @@ function Vendor:ShowNotice()
 		line:SetText(noticeLines[index] or "")
 	end
 	FitNotice()
+	if GetMerchantNumItems and GetMerchantNumItems() > 0 then
+		-- The shop window is over the character: hold the bubble until it closes.
+		noticeHeld = true
+		return
+	end
+	noticeHeld = false
+	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
+	notice:Show()
+end
+
+-- Shown when the merchant window closes, if a visit had something to say while it was open.
+function Vendor:FlushNotice()
+	if not noticeHeld then return end
+	noticeHeld = false
+	if not notice or #noticeLines == 0 then return end
 	noticeUntil = (GetTime and GetTime() or 0) + NOTICE_LIFE
 	notice:Show()
 end
@@ -225,7 +237,7 @@ end
 -- A new visit starts with a clean notice, and so does a test.
 function Vendor:ClearNotice()
 	noticeLines, noticeTitle = {}, false
-	noticeUntil = 0
+	noticeUntil, noticeHeld = 0, false
 	if notice then
 		for _, line in ipairs(notice.lines) do line:SetText("") end
 		notice:Hide()
@@ -294,17 +306,15 @@ function Vendor:StandDown()
 	return false
 end
 
--- Whether an item is good for this level: usable, and its own requirement no more than BAND
--- levels below. An item with no requirement (conjured food) always counts.
+-- Whether an item can be used at this level: its own requirement is one you already meet. That
+-- is what counts as stock and what may be restocked. Food and drink have no class gate, and
+-- the client's "is it usable" lookup is not asked, since a client that only half answers it
+-- empties the vendor.
 function Vendor:LevelAppropriate(itemID, level)
 	if not itemID then return false end
-	if not API.IsUsable(itemID) then return false end
-
 	local _, _, requiredLevel = API.ItemInfo(itemID)
 	if type(requiredLevel) ~= "number" then return true end
-	if requiredLevel > level then return false end
-	if requiredLevel > 0 and requiredLevel < level - self.BAND then return false end
-	return true
+	return requiredLevel <= (level or 0)
 end
 
 -- How much of a kind the bags hold that is worth counting. `noLearn` counts without
@@ -368,44 +378,31 @@ local function Sold(available)
 	return (available or 0) ~= 0
 end
 
--- The best item of a kind this vendor sells, ranked by the same ordering the buttons use,
--- so what is bought is what would be used. Items good for this level win; when it sells
--- none of those, the best usable one is offered rather than nothing, and said to be a
--- fallback.
+-- The best item of a kind this vendor sells that this character can use, ranked by the same
+-- ordering the buttons use, so what is bought is what would be used. Nil when it sells none.
 function Vendor:Pick(kind)
 	local level = UnitLevel("player") or 0
 	local preferBuffs = Consume:PreferBuffs(kind)
-	local best, fallback
+	local best
 
 	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
 		local itemID, price, stack, available = self:Merchant(index)
 		if itemID and Sold(available) and API.IsFoodDrink(itemID) then
 			local itemKind, amount, buffs = Detect:ScanMerchant(index)
-			if itemKind == kind then
-				local name, itemLevel, required = API.ItemInfo(itemID)
-				-- The level the item itself needs decides whether it can be used at all, in
-				-- the band or not; the client's "is it usable" lookup is not asked, since a
-				-- client that only half answers it empties the vendor.
-				if not (required and required > level) then
-					local candidate = {
-						index = index, itemID = itemID, price = price, stack = stack,
-						available = available, amount = amount or 0,
-						points = Detect:Points(buffs), itemLevel = itemLevel or 0,
-						count = available,
-					}
-					if self:LevelAppropriate(itemID, level) then
-						if Consume:Better(candidate, best, preferBuffs) then best = candidate end
-					elseif Consume:Better(candidate, fallback, preferBuffs) then
-						fallback = candidate
-					end
-				end
+			if itemKind == kind and self:LevelAppropriate(itemID, level) then
+				local name, itemLevel = API.ItemInfo(itemID)
+				local candidate = {
+					index = index, itemID = itemID, price = price, stack = stack,
+					available = available, amount = amount or 0,
+					points = Detect:Points(buffs), itemLevel = itemLevel or 0,
+					count = available,
+				}
+				if Consume:Better(candidate, best, preferBuffs) then best = candidate end
 			end
 		end
 	end
 
-	if best then return best, false end
-	if fallback then return fallback, true end
-	return nil, false
+	return best
 end
 
 -- Buys as much of the pick as the shortfall asks for, never more than the vendor holds, the
@@ -474,22 +471,25 @@ function Vendor:Buy(pick, shortfall)
 	return bought, rest, reason
 end
 
--- Whether this vendor sells anything of a kind, and whether it sells food or water it could
--- not read: a purchase that found nothing has to be told apart from a vendor that sells none.
-function Vendor:Stock(kind)
-	local found, unread = false, false
+-- Whether this vendor sells anything of a kind, whether it sells food or water it could not
+-- read, and whether any of that kind is one this character can use: a purchase that found
+-- nothing has to be told apart from a vendor that sells none, or one selling only food above
+-- this level.
+function Vendor:Stock(kind, level)
+	local found, unread, usable = false, false, false
 	for index = 1, (GetMerchantNumItems and GetMerchantNumItems() or 0) do
 		local itemID = self:Merchant(index)
 		if itemID and API.IsFoodDrink(itemID) then
 			local itemKind = Detect:ScanMerchant(index)
 			if itemKind == kind then
 				found = true
+				if self:LevelAppropriate(itemID, level or 0) then usable = true end
 			elseif itemKind == nil then
 				unread = true
 			end
 		end
 	end
-	return found, unread
+	return found, unread, usable
 end
 
 -- One merchant visit: top up whichever kinds are short, then say what happened in one line.
@@ -506,8 +506,6 @@ function Vendor:Restock(explicit)
 	-- A purchase made a moment ago may be in the bags by now; saying so costs nothing and
 	-- happens before anything else the visit does.
 	self:ReportLanded()
-	-- An explicit purchase always gets a fresh attempt at a fallback.
-	if explicit then wipe(self.fallbackDone) end
 
 	local stood, why = self:StandDown()
 	if stood then
@@ -519,28 +517,16 @@ function Vendor:Restock(explicit)
 	for _, kind in ipairs({ "food", "water" }) do
 		local shortfall = self:Shortfall(kind)
 		if shortfall > 0 then
-			local pick, fellBack = self:Pick(kind)
-			-- A weak item is only worth buying into an empty cupboard: if something usable of
-			-- that kind is already carried, a second-rate stack beside it is money spent for
-			-- nothing, and every visit would add another.
-			if pick and fellBack and not explicit and Consume:Find(kind) then
-				pick, fellBack = nil, false
-				said[#said + 1] = "your " .. kind .. " is below your level, so none was restocked"
-			end
-			-- A fallback never counts towards the target, so a second pass of this visit would
-			-- buy the same weak item again: one such purchase per kind per visit is enough.
-			if pick and not (fellBack and self.fallbackDone[kind]) then
+			local pick = self:Pick(kind)
+			if pick then
 				local bought, left, reason = self:Buy(pick, shortfall)
 				if bought > 0 then
 					didSomething = true
-					if fellBack then self.fallbackDone[kind] = true end
 					-- The purchase is reported once it lands, so what is worth saying about it
 					-- waits with it rather than in a line of its own.
 					local record = pending[pick.itemID]
-					if record then
-						if left > 0 and reason then
-							record.notes[#record.notes + 1] = reason .. ", " .. left .. " short"
-						end
+					if record and left > 0 and reason then
+						record.notes[#record.notes + 1] = reason .. ", " .. left .. " short"
 					end
 					self:Settle(pick.itemID)
 				elseif reason then
@@ -548,17 +534,17 @@ function Vendor:Restock(explicit)
 				end
 			elseif explicit then
 				said[#said + 1] = "nothing at this vendor is " .. kind
-			elseif not pick then
+			else
 				-- An automatic visit that buys nothing has to say why, or a read that fails
 				-- in the client looks exactly like a feature that does nothing.
-				local found, unread = self:Stock(kind)
-				if unread then
+				local found, unread, usable = self:Stock(kind, UnitLevel("player") or 0)
+				if found and not usable then
+					said[#said + 1] = "the " .. kind .. " here needs a higher level"
+				elseif unread then
 					said[#said + 1] = "it could not read what this vendor sells for " .. kind
 				elseif found then
 					said[#said + 1] = "no " .. kind .. " here it could buy"
 				end
-			else
-				said[#said + 1] = "the " .. kind .. " here is below your level"
 			end
 		end
 	end
@@ -598,14 +584,13 @@ function Vendor:Lines()
 	for _, kind in ipairs({ "food", "water" }) do
 		local shortfall, have = self:Shortfall(kind)
 		lines[#lines + 1] = ("%s: %d carried, %d short"):format(kind, have, shortfall)
-		local pick, fellBack = self:Pick(kind)
+		local pick = self:Pick(kind)
 		if pick then
-			lines[#lines + 1] = ("  picks %s (%d): %d per %d, %d available%s"):format(
+			lines[#lines + 1] = ("  picks %s (%d): %d per %d, %d available"):format(
 				(API.ItemInfo(pick.itemID)) or ("item " .. tostring(pick.itemID)), pick.itemID,
-				pick.price or 0, pick.stack or 1, pick.available or 0,
-				fellBack and ", below your level" or "")
+				pick.price or 0, pick.stack or 1, pick.available or 0)
 		else
-			lines[#lines + 1] = "  nothing of that kind here"
+			lines[#lines + 1] = "  nothing of that kind here it can use"
 		end
 	end
 
@@ -614,11 +599,7 @@ function Vendor:Lines()
 		if itemID then
 			local _, _, required = API.ItemInfo(itemID)
 			local note = ""
-			if required and required > level then
-				note = ", needs level " .. required
-			elseif not self:LevelAppropriate(itemID, level) then
-				note = ", outside your band"
-			end
+			if required and required > level then note = ", needs level " .. required end
 			lines[#lines + 1] = ("[%d] %s (%d) %s: %d per %d, %d available%s"):format(index,
 				(API.ItemInfo(itemID)) or "unread", itemID, Detect:ScanMerchant(index) or "not food or water",
 				price or 0, stack or 1, available or 0, note)
@@ -675,6 +656,7 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("MERCHANT_SHOW")
 events:RegisterEvent("MERCHANT_UPDATE")
+events:RegisterEvent("MERCHANT_CLOSED")
 events:RegisterEvent("PLAYER_MONEY")
 events:SetScript("OnEvent", function(_, event)
 	-- Money changing is what the window's counts are drawn against, and no reason to buy.
@@ -682,10 +664,13 @@ events:SetScript("OnEvent", function(_, event)
 		Vendor:RefreshWindow()
 		return
 	end
-	-- Opening a merchant starts a new visit, so a weak item may be bought once again.
-	if event == "MERCHANT_SHOW" then
-		wipe(Vendor.fallbackDone)
-		Vendor:ClearNotice()
+	-- Closing the merchant is when a visit's bubble is shown, since the window was over the
+	-- character while it bought.
+	if event == "MERCHANT_CLOSED" then
+		Vendor:FlushNotice()
+		return
 	end
+	-- Opening a merchant starts a new visit with a clean notice.
+	if event == "MERCHANT_SHOW" then Vendor:ClearNotice() end
 	Vendor:Request()
 end)
