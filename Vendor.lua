@@ -82,6 +82,78 @@ local function Coins(amount)
 end
 Vendor.Coins = Coins
 
+-- What a live chat bubble is made of, for the diagnostic: the client's own bubble over a unit
+-- that has just spoken, region by region - its art, its size, its place and its texture
+-- coordinates - which is the recipe a bubble drawn from the client's own pieces needs. Say
+-- something in /say and run it in the same breath, while the bubble is still up.
+function Vendor:BubbleLines()
+	local lines = {}
+	local function Add(text) lines[#lines + 1] = text end
+	local function Show(value) return type(value) == "string" or type(value) == "number" end
+	local bubbles = rawget(_G, "C_ChatBubbles")
+	if type(bubbles) ~= "table" or type(bubbles.GetAllChatBubbles) ~= "function" then
+		Add("no C_ChatBubbles.GetAllChatBubbles")
+		return lines
+	end
+	local ok, all = pcall(bubbles.GetAllChatBubbles)
+	if not ok or type(all) ~= "table" then
+		Add("GetAllChatBubbles: " .. tostring(all))
+		return lines
+	end
+	Add(("%d bubble(s) up"):format(#all))
+	for index, frame in ipairs(all) do
+		if index > 2 then
+			Add("  ... more")
+			break
+		end
+		if type(frame) == "table" then
+			local width, height = "-", "-"
+			if frame.GetSize then
+				local fine, w, h = pcall(frame.GetSize, frame)
+				if fine then width, height = tostring(w), tostring(h) end
+			end
+			local name = "-"
+			if frame.GetName then
+				local fine, held = pcall(frame.GetName, frame)
+				if fine and Show(held) then name = tostring(held) end
+			end
+			Add(("%s %sx%s"):format(name, width, height))
+			local regions = { frame.GetRegions and frame:GetRegions() }
+			for regionIndex, region in ipairs(regions) do
+				local parts = {}
+				local kind = "-"
+				if region.GetObjectType then
+					local fine, held = pcall(region.GetObjectType, region)
+					if fine and Show(held) then kind = tostring(held) end
+				end
+				parts[#parts + 1] = ("  %d %s"):format(regionIndex, kind)
+				if region.GetTexture then
+					local fine, held = pcall(region.GetTexture, region)
+					if fine and Show(held) then parts[#parts + 1] = tostring(held) end
+				end
+				if region.GetSize then
+					local fine, w, h = pcall(region.GetSize, region)
+					if fine then parts[#parts + 1] = ("%dx%d"):format(w or 0, h or 0) end
+				end
+				if region.GetPoint then
+					local fine, point, _, relativePoint, x, y = pcall(region.GetPoint, region)
+					if fine and point then
+						parts[#parts + 1] = ("%s/%s %s,%s"):format(tostring(point),
+							tostring(relativePoint), tostring(x), tostring(y))
+					end
+				end
+				if region.GetTexCoord then
+					local fine, left, right, top, bottom = pcall(region.GetTexCoord, region)
+					if fine and left then
+						parts[#parts + 1] = ("tex %.2f %.2f %.2f %.2f"):format(left, right, top, bottom)
+					end
+				end
+				Add(table.concat(parts, " "))
+			end
+		end
+	end
+	return lines
+end
 -- What a visit did is said in the client's own dialog: an entry of our own in
 -- StaticPopupDialogs, raised with StaticPopup_Show, is how this client documents a message only
 -- the player can see. The client draws, sizes and times the dialog itself, so nothing drawn here

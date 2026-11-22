@@ -1675,6 +1675,10 @@ Check("dev: and the button does nothing either", ns.Window.page ~= "debug", tost
 slash("dev")
 Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev commands: on"),
 	table.concat(MESSAGES, " / "))
+MESSAGES = {}
+slash("bubble")
+Check("dev: /bb bubble reports what a live bubble is made of", Said("bubble:"),
+	table.concat(MESSAGES, " / "))
 Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
 	tostring(ns.Window.buttons.debug.shown))
 slash("dev")
