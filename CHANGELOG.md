@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
 - An item counts as stock, and may be restocked, whenever its own level requirement is one you already meet. The ten-level band that kept modest food and water out of the count is gone, so an innkeeper's food counts again.
 - What a visit did is said in the game's own chat bubble: `Restocked`, then one line per kind, in gold, silver and copper with the client's own coin icons, and a line saying why nothing was bought when nothing was. It is the bubble the client draws over a character that speaks, made from the client's own `ChatBubbleTemplate`, so it looks native, nobody else sees it, and nothing is said in chat. It waits for the vendor window to close and goes away on its own.
