@@ -91,22 +91,24 @@ local notice, noticeLines, noticeUntil, noticeTitle = nil, {}, 0, false
 -- shown once that window is closed rather than behind it.
 local noticeHeld = false
 
--- What the client offers for a chat bubble, for the diagnostic: whether it has a bubble manager
--- an addon could ask, and what each bubble template brings with it - region by region, with the
--- art and the size it came sized at, which is what a bubble drawn to look native needs.
+-- What the client offers for a chat bubble, for the diagnostic: the names and kinds of what its
+-- bubble namespace exposes, and what each bubble template brings with it - region by region,
+-- with its art, its name and the size the client sized it at.
 function Vendor:BubbleLines()
 	local lines = {}
 	local function Add(text) lines[#lines + 1] = text end
-	for _, name in ipairs({ "ChatBubbleManager", "C_ChatBubbles" }) do
-		Add(name .. ": " .. type(rawget(_G, name)))
-	end
-	local manager = rawget(_G, "ChatBubbleManager")
-	if type(manager) == "table" then
+	local function KeysOf(value)
 		local keys = {}
-		for key in pairs(manager) do keys[#keys + 1] = tostring(key) end
+		if type(value) ~= "table" then return keys end
+		for key, held in pairs(value) do keys[#keys + 1] = ("%s(%s)"):format(tostring(key), type(held)) end
 		table.sort(keys)
-		Add("manager: " .. table.concat(keys, ", "))
+		return keys
 	end
+	local bubbles = rawget(_G, "C_ChatBubbles")
+	Add("C_ChatBubbles: " .. type(bubbles))
+	local names = KeysOf(bubbles)
+	for index = 1, math.min(#names, 24) do Add("  " .. names[index]) end
+	if #names > 24 then Add(("  ... and %d more"):format(#names - 24)) end
 	for _, template in ipairs({ "ChatBubbleFrameTemplate", "ChatBubbleTemplate" }) do
 		local ok, frame = pcall(CreateFrame, "ScrollingMessageFrame", nil, UIParent, template)
 		if not ok then
@@ -117,17 +119,28 @@ function Vendor:BubbleLines()
 			local regions = { frame.GetRegions and frame:GetRegions() }
 			Add(("%s: %d regions"):format(template, #regions))
 			for index, region in ipairs(regions) do
-				local art = "-"
-				if type(region) == "table" and region.GetTexture then
-					local fine, path = pcall(region.GetTexture, region)
-					if fine and path then art = tostring(path) end
+				local parts = { index }
+				if type(region) == "table" then
+					local kind = "-"
+					if region.GetObjectType then
+						local fine, held = pcall(region.GetObjectType, region)
+						if fine and held then kind = tostring(held) end
+					end
+					parts[#parts + 1] = kind
+					if region.GetName then
+						local fine, held = pcall(region.GetName, region)
+						if fine and held then parts[#parts + 1] = tostring(held) end
+					end
+					if region.GetTexture then
+						local fine, held = pcall(region.GetTexture, region)
+						if fine and held then parts[#parts + 1] = tostring(held) end
+					end
+					if region.GetSize then
+						local fine, width, height = pcall(region.GetSize, region)
+						if fine and width then parts[#parts + 1] = ("%dx%d"):format(width or 0, height or 0) end
+					end
 				end
-				local size = ""
-				if type(region) == "table" and region.GetSize then
-					local fine, width, height = pcall(region.GetSize, region)
-					if fine and width then size = (" %dx%d"):format(width or 0, height or 0) end
-				end
-				Add(("  %d %s %s%s"):format(index, type(region), art, size))
+				Add("  " .. table.concat(parts, " "))
 			end
 		end
 	end

@@ -1692,7 +1692,7 @@ Check("dev: /bb dev switches them on", BestBite:Dev() == true and Said("dev comm
 MESSAGES = {}
 slash("bubble")
 Check("dev: /bb bubble reports what the client offers for a bubble",
-	Said("ChatBubbleManager") and Said("ChatBubbleFrameTemplate"), table.concat(MESSAGES, " / "))
+	Said("C_ChatBubbles:") and Said("ChatBubbleTemplate"), table.concat(MESSAGES, " / "))
 Check("dev: and the Debug button comes back", ns.Window.buttons.debug.shown == true,
 	tostring(ns.Window.buttons.debug.shown))
 slash("dev")
